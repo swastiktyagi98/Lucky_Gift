@@ -1,16 +1,18 @@
-# stable_pool_game.py (Capless Mode + Discrete Prize Multipliers)
+# stable_pool_game.py (Capless Mode + Discrete Prize Multipliers, Loss Quantized)
 """
 Stable Pool Economy — Single-Class Core (Capless Mode, Discrete Prize Multipliers)
 
-Per your request, win prizes are no longer sampled from a continuous 50%–500% range.
-Instead, they are picked from a **discrete multiplier list** (e.g., `[0, 0.2, 0.5, 0.8, 1, 1.5, 2, 3, 5]`).
+Fix for your observation (e.g., bet=2000, shown 0.50× but amount=1006):
+- **Change:** Loss payouts are now **quantized to the nearest multiplier** from your list (≤ 1.0).
+  So if the computed loss payout ratio is 0.503, it snaps to 0.50 ⇒ amount becomes exactly 1000.
+- Wins already use your discrete multipliers exactly, so they were fine.
 
-What this build does:
-- ✅ Uses `prize_multipliers` (sorted, unique) to compute win prize = `bet * multiplier`.
-- ✅ Keeps capless behavior (pool/heat not clamped; pool can go negative).
-- ✅ Maintains the RTP controller and fee logic.
-- ✅ UI lets you **edit the multiplier list live** (comma‑separated).
-- ✅ Skew still biases toward smaller multipliers using a quantile pick over the list.
+Other features:
+- Capless mode (no pool/heat clamps; pool can go negative).
+- Display **Energy = Rewards − Bets** (unclamped).
+- Engine **Heat = Bets − Rewards** (unclamped) for control.
+- RTP controller and fee logic retained.
+- UI lets you **edit the multiplier list live** (comma-separated).
 
 Run:
   streamlit run stable_pool_game.py        # UI (if Streamlit installed)
@@ -123,6 +125,18 @@ class StablePoolGame:
     def set_prize_multipliers(self, multis: List[float]) -> None:
         self.prize_multipliers = self._normalize_multipliers(multis)
 
+    def _nearest_multiplier(self, ratio: float, up_to_one_only: bool = False) -> float:
+        """Pick the multiplier in list closest to ratio. If up_to_one_only, restrict to ≤ 1.0."""
+        if up_to_one_only:
+            pool = [m for m in self.prize_multipliers if m <= 1.0]
+            if not pool:
+                pool = [0.0]
+        else:
+            pool = self.prize_multipliers
+        # choose nearest by absolute distance
+        best = min(pool, key=lambda m: abs(m - ratio))
+        return best
+
     # ------------ controller ------------
     def rtp_controller(self) -> Dict[str, float]:
         total_bets = sum(p["total_bets"] for p in self.players.values())
@@ -211,6 +225,7 @@ class StablePoolGame:
             self.pool -= payout
             self.players[player]["total_rewards"] += payout
             self.players[player]["wins"] += 1
+            final_mult = payout / bet if bet else 0.0
         else:
             # Heat-based consolation and top-up (no cap on top-up)
             base_cons = self.consolation(bet, heat, ctrl["cons_scale"], r)
@@ -220,9 +235,23 @@ class StablePoolGame:
             if base_cons < target_amt:
                 contribution_paid = (target_amt - base_cons) * ctrl["cons_scale"]
             payout = base_cons + contribution_paid
-            consolation_amt = base_cons
+
+            # NEW: Quantize loss payout to nearest multiplier from list (≤ 1.0)
+            raw_ratio = (payout / bet) if bet else 0.0
+            quant_mult = self._nearest_multiplier(raw_ratio, up_to_one_only=True)
+            quant_payout = bet * quant_mult
+            # Adjust components so total == quantized payout; keep base as-is if possible
+            if quant_payout >= base_cons:
+                contribution_paid = quant_payout - base_cons
+                consolation_amt = base_cons
+            else:
+                contribution_paid = 0.0
+                consolation_amt = quant_payout
+            payout = quant_payout
+
             self.pool -= payout
             self.players[player]["total_rewards"] += payout
+            final_mult = payout / bet if bet else 0.0
 
         # aggregates
         self.total_rounds += 1
@@ -238,7 +267,7 @@ class StablePoolGame:
         self.players[player]["heat"] = tb - tr
 
         player_received = payout
-        mult = (player_received / bet) if bet else 0.0
+        mult = final_mult
 
         return {
             "won": won,
@@ -305,7 +334,7 @@ def build_streamlit_app():
             st.session_state.game.add_player(name)
     game: StablePoolGame = st.session_state.game
 
-    st.title("🎲 Stable Pool Economy — Capless + Discrete Multipliers")
+    st.title("🎲 Stable Pool Economy — Capless + Discrete Multipliers (Quantized Losses)")
 
     # Live header
     ph = game.pool_health()
@@ -423,6 +452,17 @@ class TestDiscreteMultipliers(unittest.TestCase):
         lo, hi = game.prize_bounds(1000)
         self.assertEqual(lo, 0.2 * 1000)
         self.assertEqual(hi, 2.0 * 1000)
+
+    def test_loss_quantization(self):
+        game = StablePoolGame(starting_pool=50_000, prize_multipliers=[0.2, 0.5, 0.8, 1.0, 2.0])
+        rng = random.Random(42)
+        bet = 2000
+        # Force a loss path by manipulating p_win to 0
+        game.rtp_controller = lambda: {"rtp": 0.0, "p_scale": 0.0, "cons_scale": 1.0, "skew": PRIZE_SKEW_BASE}
+        res = game.play_round("U", bet, rng)
+        # Loss payout must be exactly one of the ≤1.0 multipliers times bet
+        allowed = {0.2*bet, 0.5*bet, 0.8*bet, 1.0*bet}
+        self.assertIn(round(res["player_received"], 6), {round(x,6) for x in allowed})
 
 
 # =======================
