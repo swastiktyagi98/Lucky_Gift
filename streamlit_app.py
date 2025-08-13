@@ -1,18 +1,16 @@
-# stable_pool_game.py (Capless Mode)
+# stable_pool_game.py (Capless Mode + Discrete Prize Multipliers)
 """
-Stable Pool Economy — Single-Class Core (Capless Mode)
+Stable Pool Economy — Single-Class Core (Capless Mode, Discrete Prize Multipliers)
 
-What changed (per your request to remove caps):
-- ❌ Removed pool clamping: pool may go negative or grow unbounded.
-- ❌ Removed heat clamping: heat = bets − rewards (unclamped).
-- ❌ Removed prize rounding to nearest 10.
-- ❌ Removed pool-affordability cap on win payouts (pool can pay even if it goes negative).
-- ❌ Removed top-up cap on consolation (was 10% of bet).
-- ❌ Removed controller clamps (p_scale/cons_scale/adj no longer clipped).
+Per your request, win prizes are no longer sampled from a continuous 50%–500% range.
+Instead, they are picked from a **discrete multiplier list** (e.g., `[0, 0.2, 0.5, 0.8, 1, 1.5, 2, 3, 5]`).
 
-What remains for correctness (mathematical safety only):
-- ✅ Win probability is still bounded to [0, 1].
-- ✅ Win prizes still respect your design rule: **50%–500% of bet** (not a cap we remove).
+What this build does:
+- ✅ Uses `prize_multipliers` (sorted, unique) to compute win prize = `bet * multiplier`.
+- ✅ Keeps capless behavior (pool/heat not clamped; pool can go negative).
+- ✅ Maintains the RTP controller and fee logic.
+- ✅ UI lets you **edit the multiplier list live** (comma‑separated).
+- ✅ Skew still biases toward smaller multipliers using a quantile pick over the list.
 
 Run:
   streamlit run stable_pool_game.py        # UI (if Streamlit installed)
@@ -27,7 +25,7 @@ import random
 import sys
 import unittest
 from math import exp
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 
 # Optional Streamlit import
 try:
@@ -40,18 +38,13 @@ except Exception:
 # =======================
 # Config / constants
 # =======================
-# NOTE: No pool/heat clamps in capless mode.
 E_SCALE = 300.0
-P_SCALE = 50_000.0  # scale for pool activation; loosely set, not a cap
+P_SCALE = 50_000.0  # soft scale for pool activation (capless mode)
 
 # RTP & probability control
 RTP_TARGET = 0.98
 RTP_SENSITIVITY = 0.25
 BASE_P = 0.48
-
-# Win prize range: 50%..500% of bet (kept by design)
-PRIZE_MIN_MULT = 0.50
-PRIZE_MAX_MULT = 5.00
 
 # Prize skew — higher => more small wins
 PRIZE_SKEW_BASE = 3.0
@@ -66,27 +59,30 @@ BET_CHOICES = [100, 500, 1000, 2000, 5000, 10_000, 20_000]
 # Cosmetic: near-max counts as “jackpot” in labeling
 JACKPOT_NEAR_MAX_THRESHOLD = 0.95
 
+# Default discrete prize multipliers (editable in UI)
+DEFAULT_PRIZE_MULTIPLIERS: List[float] = [0.0, 0.2, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0]
+
 
 # =======================
 # Core class
 # =======================
 class StablePoolGame:
     """
-    Capless core for the stable pool economy game.
+    Capless core for the stable pool economy game, with **discrete** prize multipliers.
 
-    Display Energy = Rewards − Bets  (unclamped, user-facing)
-    Engine Heat    = Bets − Rewards  (unclamped, stability control)
+    Display Energy = Rewards − Bets   (unclamped, user-facing)
+    Engine Heat    = Bets − Rewards   (unclamped, stability control)
     No loss-streak counters.
     """
 
-    def __init__(self, starting_pool: float = 50_000.0):
+    def __init__(self, starting_pool: float = 50_000.0, prize_multipliers: Optional[List[float]] = None):
         self.starting_pool: float = float(starting_pool)
         self.pool: float = float(starting_pool)
         self.players: Dict[str, Dict[str, float]] = {}
-        # aggregates
         self.total_rounds: int = 0
         self.total_house_fees: float = 0.0
         self.total_pool_contributions: float = 0.0
+        self.prize_multipliers: List[float] = self._normalize_multipliers(prize_multipliers or DEFAULT_PRIZE_MULTIPLIERS)
 
     # ------------ player/state ------------
     def add_player(self, name: str) -> None:
@@ -118,6 +114,15 @@ class StablePoolGame:
         # Use pool above 0 as a simple health proxy; negative pool gives ~0 activation.
         return self._exp01_pos(pool_balance, P_SCALE)
 
+    @staticmethod
+    def _normalize_multipliers(multis: List[float]) -> List[float]:
+        # Keep non-negative, unique, sorted, and ensure at least one value.
+        clean = sorted({m for m in multis if isinstance(m, (int, float)) and m >= 0.0})
+        return clean or [0.0]
+
+    def set_prize_multipliers(self, multis: List[float]) -> None:
+        self.prize_multipliers = self._normalize_multipliers(multis)
+
     # ------------ controller ------------
     def rtp_controller(self) -> Dict[str, float]:
         total_bets = sum(p["total_bets"] for p in self.players.values())
@@ -125,7 +130,7 @@ class StablePoolGame:
         rtp = (total_rewards / total_bets) if total_bets > 0 else RTP_TARGET
 
         delta = rtp - RTP_TARGET
-        adj = delta * RTP_SENSITIVITY  # no clamp
+        adj = delta * RTP_SENSITIVITY  # capless: no clamp
 
         p_scale = 1.0 - adj            # may be >1 or <1 (prob still bounded to [0,1] later)
         cons_scale = 1.0 - 0.7 * adj   # may be >1 or <1
@@ -145,20 +150,26 @@ class StablePoolGame:
         return p
 
     def prize_bounds(self, bet: float) -> Tuple[float, float]:
-        # No affordability or rounding caps — just the 50%..500% design rule.
-        return bet * PRIZE_MIN_MULT, bet * PRIZE_MAX_MULT
+        lo = min(self.prize_multipliers) * bet
+        hi = max(self.prize_multipliers) * bet
+        return lo, hi
 
     def sample_win_prize(self, bet: float, skew: float, rng: Optional[random.Random] = None) -> Tuple[float, bool]:
         r = rng if rng is not None else random
-        low, high = self.prize_bounds(bet)
-        u = (r.random()) ** max(1.0, skew)  # skew to smaller wins
-        raw = low + (high - low) * u
-        prize = raw
-        is_jp = prize >= JACKPOT_NEAR_MAX_THRESHOLD * (bet * PRIZE_MAX_MULT)
+        # Quantile pick over discrete multipliers: u**skew biases toward lower values
+        multis = self.prize_multipliers
+        n = len(multis)
+        if n == 0:
+            return 0.0, False
+        u = (r.random()) ** max(1.0, skew)
+        idx = min(int(u * n), n - 1)
+        mult = multis[idx]
+        prize = bet * mult
+        is_jp = (mult >= JACKPOT_NEAR_MAX_THRESHOLD * max(multis))
         return prize, is_jp
 
     def consolation(self, bet: float, heat: float, cons_scale: float, rng: Optional[random.Random] = None) -> float:
-        # Heat-based consolation (no streaks, no caps)
+        # Heat-based consolation (no streaks, capless)
         r = rng if rng is not None else random
         heat_fac = self.heat_activation(heat)  # 0..1
         base_pct = 0.05 + 0.30 * heat_fac      # 5%..35% base
@@ -188,7 +199,7 @@ class StablePoolGame:
 
         if won:
             proposed, is_jackpot = self.sample_win_prize(bet, ctrl["skew"], r)
-            gross = proposed  # no affordability cap
+            gross = proposed  # capless: no affordability cap
             profit_threshold = bet * WIN_FEE_THRESHOLD_MULT
             if gross > profit_threshold:
                 profit = max(0.0, gross - bet)
@@ -252,7 +263,7 @@ class StablePoolGame:
         return (tr / tb) if tb > 0 else 0.0
 
     def pool_health(self) -> float:
-        # In capless mode, show a soft-normalized health based on positive pool only.
+        # Soft-normalized health based on positive pool only.
         return self._exp01_pos(self.pool, P_SCALE)
 
     def ledger_snapshot(self) -> Dict[str, float]:
@@ -265,7 +276,7 @@ class StablePoolGame:
             "total_bets": tb,
             "total_rewards": tr,
             "expected_pool": expected_pool,
-            "ledger_delta": delta,  # should remain ~0 if accounting is correct
+            "ledger_delta": delta,
         }
 
 
@@ -273,29 +284,48 @@ class StablePoolGame:
 # Streamlit UI
 # =======================
 
+def _parse_multiplier_csv(s: str) -> List[float]:
+    try:
+        parts = [p.strip() for p in s.split(",") if p.strip() != ""]
+        vals = [float(p) for p in parts]
+        # dedupe, sort, non-negative
+        uniq = sorted({v for v in vals if v >= 0.0})
+        return uniq or DEFAULT_PRIZE_MULTIPLIERS
+    except Exception:
+        return DEFAULT_PRIZE_MULTIPLIERS
+
+
 def build_streamlit_app():
     if not ST_AVAILABLE:
         raise RuntimeError("Streamlit is not installed in this environment.")
 
-    # Persist game state across reruns
     if "game" not in st.session_state:
-        st.session_state.game = StablePoolGame()
+        st.session_state.game = StablePoolGame(prize_multipliers=DEFAULT_PRIZE_MULTIPLIERS)
         for name in ("UserA", "UserB", "UserC"):
             st.session_state.game.add_player(name)
-
     game: StablePoolGame = st.session_state.game
 
-    st.title("🎲 Stable Pool Economy — Capless (Energy = Rewards − Bets)")
+    st.title("🎲 Stable Pool Economy — Capless + Discrete Multipliers")
 
+    # Live header
     ph = game.pool_health()
     status = "🟢 Excellent" if ph > 0.7 else "🟡 Good" if ph > 0.4 else "🟠 Low" if ph > 0.2 else "🔴 Critical"
     st.markdown(f"**💰 Pool:** {game.pool:,.0f} {status} (Health: {ph:.1%})")
 
     st.caption(
-        f"Win prize range: {int(PRIZE_MIN_MULT*100)}%–{int(PRIZE_MAX_MULT*100)}% of bet · "
-        f"RTP target: {RTP_TARGET:.1%} · Fee: {HOUSE_FEE:.0%} on profit above {WIN_FEE_THRESHOLD_MULT:.1f}×"
+        f"Discrete prize multipliers • RTP target: {RTP_TARGET:.1%} • Fee: {HOUSE_FEE:.0%} on profit above {WIN_FEE_THRESHOLD_MULT:.1f}×"
     )
 
+    # Multiplier editor
+    with st.expander("⚙️ Prize multipliers (comma-separated)", expanded=False):
+        current = ",".join(str(m).rstrip("0").rstrip(".") if isinstance(m, float) else str(m) for m in game.prize_multipliers)
+        new_csv = st.text_input("Multipliers", value=current, help="Example: 0,0.2,0.5,0.8,1,1.5,2,3,5")
+        if st.button("Update Multipliers"):
+            new_list = _parse_multiplier_csv(new_csv)
+            game.set_prize_multipliers(new_list)
+            st.success(f"Updated multipliers → {new_list}")
+
+    # Controls
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         user_choice = st.selectbox("Player", list(game.players.keys()))
@@ -304,7 +334,7 @@ def build_streamlit_app():
         bet_choice = st.selectbox("Bet", BET_CHOICES, index=default_idx)
     with col3:
         if st.button("🔄 Reset Game"):
-            st.session_state.game = StablePoolGame()
+            st.session_state.game = StablePoolGame(prize_multipliers=game.prize_multipliers)
             for name in ("UserA", "UserB", "UserC"):
                 st.session_state.game.add_player(name)
             st.rerun()
@@ -315,12 +345,13 @@ def build_streamlit_app():
     lo, hi = game.prize_bounds(bet_choice)
 
     st.markdown(
-        f"**Win Probability:** {p_win:.1%} — Prize bounds: **{lo:,.0f}** to **{hi:,.0f}**  "
+        f"**Win Probability:** {p_win:.1%} — Prize range: **{lo:,.0f}** to **{hi:,.0f}**  "
         f"**Energy (R−B):** {game.players[user_choice]['energy']:,.0f} • **Heat (B−R):** {heat:,.0f}"
     )
     st.info(
         f"""Actual RTP: {game.rtp()*100:.2f}% | Target: {RTP_TARGET*100:.2f}%
-Control — p×: {ctrl['p_scale']:.3f}, cons×: {ctrl['cons_scale']:.3f}, skew: {ctrl['skew']:.2f}"""
+Control — p×: {ctrl['p_scale']:.3f}, cons×: {ctrl['cons_scale']:.3f}, skew: {ctrl['skew']:.2f}
+Multipliers: {game.prize_multipliers}"""
     )
 
     if st.button("🎲 Play Round"):
@@ -353,7 +384,7 @@ Control — p×: {ctrl['p_scale']:.3f}, cons×: {ctrl['cons_scale']:.3f}, skew: 
 
 def cli_sim(rounds: int, seed: int | None):
     rng = random.Random(seed) if seed is not None else random
-    game = StablePoolGame()
+    game = StablePoolGame(prize_multipliers=DEFAULT_PRIZE_MULTIPLIERS)
     for name in ("UserA", "UserB", "UserC"):
         game.add_player(name)
 
@@ -377,13 +408,21 @@ def cli_sim(rounds: int, seed: int | None):
 # =======================
 # Tests (light)
 # =======================
-class TestPrizeBounds(unittest.TestCase):
-    def test_bounds(self):
-        game = StablePoolGame(starting_pool=0)
+class TestDiscreteMultipliers(unittest.TestCase):
+    def test_sampling_uses_list(self):
+        game = StablePoolGame(starting_pool=0, prize_multipliers=[0.0, 0.5, 1.0, 3.0])
+        rng = random.Random(123)
         bet = 1000
-        lo, hi = game.prize_bounds(bet)
-        self.assertEqual(lo, bet * PRIZE_MIN_MULT)
-        self.assertEqual(hi, bet * PRIZE_MAX_MULT)
+        for _ in range(100):
+            prize, _ = game.sample_win_prize(bet, PRIZE_SKEW_BASE, rng)
+            mult = prize / bet if bet else 0.0
+            self.assertIn(round(mult, 6), {0.0, 0.5, 1.0, 3.0})
+
+    def test_bounds_follow_list(self):
+        game = StablePoolGame(starting_pool=0, prize_multipliers=[0.2, 1.5, 2.0])
+        lo, hi = game.prize_bounds(1000)
+        self.assertEqual(lo, 0.2 * 1000)
+        self.assertEqual(hi, 2.0 * 1000)
 
 
 # =======================
