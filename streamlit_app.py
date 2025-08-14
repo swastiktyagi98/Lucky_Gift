@@ -26,7 +26,7 @@ SYSTEM_FEE_RATE = 0.10
 BET_CHOICES = [100, 500, 1000, 2000, 5000, 10_000]
 
 # Prize multipliers (what you can win)
-PRIZE_MULTIPLIERS = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 10.0]
+PRIZE_MULTIPLIERS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
 
 # Base win probability (fair 50/50 minus system fee)
 BASE_WIN_PROBABILITY = 0.45  # Slightly below 50% to account for system fee
