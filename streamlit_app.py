@@ -25,7 +25,7 @@ BASELINE_PRIZE_MULTIPLIERS = [
     0.0,
     0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9,
     1.0, 1.05,
-    1.2, 1.5, 2.0
+    1.2, 1.5, 2.0, 5.0,8,.0
 ]
 BASELINE_PRIZE_WEIGHTS = [
     1,
