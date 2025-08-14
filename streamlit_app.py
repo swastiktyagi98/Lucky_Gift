@@ -40,7 +40,7 @@ def _weighted_avg(mults, weights) -> float:
 BASELINE_EXPECTED_PAYOUT_FACTOR = BASELINE_WIN_PROBABILITY * _weighted_avg(
     BASELINE_PRIZE_MULTIPLIERS, BASELINE_PRIZE_WEIGHTS
 )
-# For reference, this is ~0.86155 (i.e., ~86.16% of bet paid out on average). Pool receives 90% of bet.
+# For reference, this is ~0.862 (i.e., ~86.2% of bet paid out on average). Pool receives 90% of bet.
 
 # =======================
 # Configuration (active)
@@ -85,8 +85,8 @@ STARTING_POOL = 100_000.0
 _active_avg = _weighted_avg(PRIZE_MULTIPLIERS, PRIZE_WEIGHTS)
 PRIZE_SCALE = BASELINE_EXPECTED_PAYOUT_FACTOR / max(CASH_WIN_CHANCE * _active_avg, 1e-9)
 
-# Safety: do not let scale go negative or absurd
-PRIZE_SCALE = max(min(PRIZE_SCALE, 2.0), 0.2)  # keep within sensible bounds
+# Safety: keep scale within sensible bounds
+PRIZE_SCALE = max(min(PRIZE_SCALE, 2.0), 0.2)
 
 # =======================
 # Game class
@@ -322,7 +322,7 @@ def main():
             with col2:
                 st.metric("Total Won", f"${stats['total_won']:,.0f}")
                 st.metric("Cash Wins", f"{stats['wins']}")
-            with col_t3:
+            with col3:  # <-- fixed: was 'col_t3'
                 st.markdown(
                     f"**Balance:** <span style='color:{balance_color}'>${stats['balance']:+,.0f}</span>",
                     unsafe_allow_html=True
@@ -358,7 +358,7 @@ def main():
     if game.history:
         st.divider()
         st.subheader("📝 Recent Rounds")
-        for r in reversed(game.history[-10:]):
+        for r in reversed(game.history[-10:)):
             if r["won"]:
                 outcome = f"🎊 WIN ${r['prize']:,.0f} ({r['multiplier']:.2f}×)"
             else:
