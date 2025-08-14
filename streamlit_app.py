@@ -3,21 +3,22 @@
 Player-Friendly Pool Game
 
 Goal of this version:
-- Increase Cash Win Rate WITHOUT increasing loss (pool profit stays the same).
-- Convert rare 0× to micro-win (0.05×) so every hit pays > 0.
-- Raise Cash Win Chance to 90% (tweakable), and auto-scale prizes so RTP = baseline.
-- Persist and show the latest round result just under the PLAY button.
+- Push Cash Win Rate higher (97%) WITHOUT increasing loss (pool profit stays the same).
+- Keep micro-win so every paying round > $0.
+- Auto-scale prizes so RTP = baseline (no pool loss increase).
+- Persist and show the latest round result under the PLAY button.
+- Show last-10-rounds cash win rate to verify behavior quickly.
 """
 
 import random
 import streamlit as st
-from typing import Dict
+from typing import Dict, List
 
 # =======================
 # Baseline (for RTP lock)
 # =======================
-# These are the OLD settings used to compute the baseline expected payout (do not change unless
-# you want a new baseline). We lock the new config to this expected payout so pool profit is unchanged.
+# These are the OLD settings used to compute the baseline expected payout.
+# We lock the new config to this expected payout so pool profit is unchanged.
 
 BASELINE_WIN_PROBABILITY = 0.85
 BASELINE_PRIZE_MULTIPLIERS = [
@@ -33,34 +34,31 @@ BASELINE_PRIZE_WEIGHTS = [
     14, 11, 9
 ]
 
-def _weighted_avg(mults, weights) -> float:
+def _weighted_avg(mults: List[float], weights: List[int]) -> float:
     tw = sum(weights)
     return sum(m*w for m, w in zip(mults, weights)) / tw if tw else 0.0
 
 BASELINE_EXPECTED_PAYOUT_FACTOR = BASELINE_WIN_PROBABILITY * _weighted_avg(
     BASELINE_PRIZE_MULTIPLIERS, BASELINE_PRIZE_WEIGHTS
 )
-# For reference, this is ~0.862 (i.e., ~86.2% of bet paid out on average). Pool receives 90% of bet.
+# ≈ 0.862 of bet paid on average; pool still receives 90% (after system fee).
 
 # =======================
-# Configuration (active)
+# Active configuration
 # =======================
 
-# System takes 10% of every bet
 SYSTEM_FEE_RATE = 0.10
-
-# Available bet amounts
 BET_CHOICES = [100, 500, 1000, 2000, 5000, 10_000]
 
-# TARGET cash win chance (payout > 0) — tweak this to raise/lower Cash Win Rate.
-CASH_WIN_CHANCE = 0.90  # e.g., 0.90 = 90% of rounds pay something
+# TARGET cash win chance (payout > 0).
+CASH_WIN_CHANCE = 0.97  # 97% paying rounds; triple-loss odds ~0.0027%
 
-# Replace the old 0× with a MICRO win so every hit pays > 0
-MIN_MICRO_WIN = 0.05  # 5% of bet on the rarest outcome
+# Micro-win so every paying round > $0 (pre-scale).
+MIN_MICRO_WIN = 0.05  # 5% of bet on the rarest outcome before scaling
 
-# Prize multipliers (we’ll scale these automatically to keep RTP = baseline)
+# Prize multipliers (we’ll scale with PRIZE_SCALE to hold RTP at baseline)
 PRIZE_MULTIPLIERS = [
-    MIN_MICRO_WIN,       # used to be 0.0
+    MIN_MICRO_WIN,       # used to be 0.0 in baseline
     0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9,
     1.0, 1.05,
     1.2, 1.5, 2.0
@@ -74,19 +72,16 @@ PRIZE_WEIGHTS = [
     14, 11, 9
 ]
 
-# Starting pool
 STARTING_POOL = 100_000.0
 
 # =======================
 # Derived calibration
 # =======================
 
-# We scale prizes so: CASH_WIN_CHANCE * (weighted avg multiplier * SCALE) == BASELINE_EXPECTED_PAYOUT_FACTOR
 _active_avg = _weighted_avg(PRIZE_MULTIPLIERS, PRIZE_WEIGHTS)
+# Scale so: CASH_WIN_CHANCE * (_active_avg * PRIZE_SCALE) == BASELINE_EXPECTED_PAYOUT_FACTOR
 PRIZE_SCALE = BASELINE_EXPECTED_PAYOUT_FACTOR / max(CASH_WIN_CHANCE * _active_avg, 1e-9)
-
-# Safety: keep scale within sensible bounds
-PRIZE_SCALE = max(min(PRIZE_SCALE, 2.0), 0.2)
+PRIZE_SCALE = max(min(PRIZE_SCALE, 2.0), 0.2)  # safety bounds
 
 # =======================
 # Game class
@@ -94,8 +89,8 @@ PRIZE_SCALE = max(min(PRIZE_SCALE, 2.0), 0.2)
 
 class PlayerFriendlyPoolGame:
     """
-    Game designed to give frequent cash wins while protecting the pool.
-    Expected payout is locked to the baseline → pool profit unchanged.
+    Frequent cash wins with pool protection.
+    Expected payout is locked to baseline via PRIZE_SCALE → pool profit unchanged.
     """
     def __init__(self):
         self.pool = STARTING_POOL
@@ -104,14 +99,12 @@ class PlayerFriendlyPoolGame:
         self.total_payouts = 0.0
         self.total_rounds = 0
 
-        # Player stats
         self.players = {
             "Player 1": {"balance": 0.0, "total_bet": 0.0, "total_won": 0.0, "rounds": 0, "wins": 0, "hits": 0},
             "Player 2": {"balance": 0.0, "total_bet": 0.0, "total_won": 0.0, "rounds": 0, "wins": 0, "hits": 0},
             "Player 3": {"balance": 0.0, "total_bet": 0.0, "total_won": 0.0, "rounds": 0, "wins": 0, "hits": 0},
         }
 
-        # Recent history
         self.history = []
 
     def _select_multiplier(self) -> float:
@@ -120,32 +113,29 @@ class PlayerFriendlyPoolGame:
         return random.choices(PRIZE_MULTIPLIERS, weights=PRIZE_WEIGHTS)[0]
 
     def play_round(self, player: str, bet_amount: float) -> Dict:
-        # System fee and effective bet to pool
         system_fee = bet_amount * SYSTEM_FEE_RATE
         effective_bet = bet_amount - system_fee
         self.pool += effective_bet
 
-        # Tracking
         self.total_bets += bet_amount
         self.total_fees_collected += system_fee
         self.total_rounds += 1
 
-        # Player tracking
         p = self.players[player]
         p["total_bet"] += bet_amount
         p["rounds"] += 1
 
-        # Determine if this round pays (cash win chance)
+        # Cash win gate
         pays = random.random() < CASH_WIN_CHANCE
 
         prize = 0.0
-        multiplier = 0.0
+        eff_mult = 0.0
         hit = False
 
         if pays:
             hit = True
-            multiplier = self._select_multiplier()
-            eff_mult = multiplier * PRIZE_SCALE
+            base_mult = self._select_multiplier()
+            eff_mult = base_mult * PRIZE_SCALE
             prize = bet_amount * eff_mult
 
             # Pay out from pool
@@ -156,15 +146,12 @@ class PlayerFriendlyPoolGame:
                 prize = max(0, self.pool * 0.5)
                 eff_mult = (prize / bet_amount) if bet_amount > 0 else 0.0
                 self.pool -= prize
-                # keep "multiplier" display aligned with effective
-                multiplier = eff_mult / max(PRIZE_SCALE, 1e-9)
 
             p["total_won"] += prize
             p["wins"] += 1
             p["hits"] += 1
             self.total_payouts += prize
 
-        # Update balance
         p["balance"] = p["total_won"] - p["total_bet"]
 
         result = {
@@ -173,10 +160,10 @@ class PlayerFriendlyPoolGame:
             "bet": bet_amount,
             "system_fee": system_fee,
             "effective_bet": effective_bet,
-            "hit": hit,             # landed in paying state
-            "won": pays,            # same as hit (every hit pays > 0)
+            "hit": hit,
+            "won": pays,                 # == hit; every hit pays > 0
             "prize": prize,
-            "multiplier": multiplier * PRIZE_SCALE if hit else 0.0,  # show effective multiplier
+            "multiplier": eff_mult,      # effective (post-scale) multiplier
             "pool_after": self.pool
         }
 
@@ -206,10 +193,16 @@ class PlayerFriendlyPoolGame:
 # Streamlit UI
 # =======================
 
+def _last_n_cash_win_rate(history, n=10) -> float:
+    if not history:
+        return 0.0
+    sample = history[-n:]
+    wins = sum(1 for r in sample if r["won"])
+    return wins / len(sample)
+
 def main():
     st.set_page_config(page_title="Player-Friendly Pool Game", page_icon="🎊", layout="centered")
 
-    # Initialize game
     if "game" not in st.session_state:
         st.session_state.game = PlayerFriendlyPoolGame()
     if "last_result" not in st.session_state:
@@ -330,6 +323,12 @@ def main():
                 st.metric("Hit Rate", f"{hit_rate:.1%}", help="Paying rounds")
                 st.metric("Cash Win Rate", f"{cash_win_rate:.1%}", help="Rounds with payout > 0")
 
+    # Quick feel check: last-10 cash win rate
+    if game.history:
+        st.divider()
+        last10 = _last_n_cash_win_rate(game.history, 10)
+        st.write(f"Recent cash win rate (last 10): **{last10:.0%}** (target {CASH_WIN_CHANCE:.0%})")
+
     # System Performance
     st.divider()
     st.subheader("🎯 System Performance")
@@ -344,7 +343,6 @@ def main():
         st.metric("Pool Receives", f"${game_stats['total_bets'] * (1 - SYSTEM_FEE_RATE):,.0f}")
         st.metric("Pool Net Gain", f"${game_stats['pool_profit']:+,.0f}")
 
-    # Why pool stays profitable
     if game_stats['total_rounds'] > 0:
         st.info(f"""
         **Why the pool stays profitable:**
@@ -358,11 +356,8 @@ def main():
     if game.history:
         st.divider()
         st.subheader("📝 Recent Rounds")
-        for r in reversed(game.history[-10:]):  # <-- fixed closing parens
-            if r["won"]:
-                outcome = f"🎊 WIN ${r['prize']:,.0f} ({r['multiplier']:.2f}×)"
-            else:
-                outcome = "❌ LOSS $0"
+        for r in reversed(game.history[-10:]):
+            outcome = f"🎊 WIN ${r['prize']:,.0f} ({r['multiplier']:.2f}×)" if r["won"] else "❌ LOSS $0"
             st.text(f"Round {r['round']}: {r['player']} bet ${r['bet']:,} → {outcome}")
 
     # Prize Distribution (effective)
