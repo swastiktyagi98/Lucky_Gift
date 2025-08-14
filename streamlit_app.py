@@ -1,14 +1,13 @@
-# organic_pool_game.py
+# player_friendly_pool_game.py
 """
-Organic Pool Game - Simple & Fair Approach
+Player-Friendly Pool Game
 
 Key Features:
-- Pure random outcomes (no artificial manipulation)
+- High win rate (~85%) for better player experience
+- Smart prize system that protects pool
 - 10% system fee on every bet
-- Simple multiplier-based prizes
-- Clean, minimal UI
-- No complex heat/energy systems
-- Truly organic gameplay
+- Pool-sustainable prizes (always less than what pool receives)
+- Simple, clean UI
 """
 
 import random
@@ -16,7 +15,7 @@ import streamlit as st
 from typing import List, Dict, Tuple
 
 # =======================
-# Simple Configuration
+# Configuration
 # =======================
 
 # System takes 10% of every bet
@@ -25,23 +24,35 @@ SYSTEM_FEE_RATE = 0.10
 # Available bet amounts
 BET_CHOICES = [100, 500, 1000, 2000, 5000, 10_000]
 
-# Prize multipliers (what you can win)
-PRIZE_MULTIPLIERS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
+# High win rate for player satisfaction
+WIN_PROBABILITY = 0.85
 
-# Base win probability (fair 50/50 minus system fee)
-BASE_WIN_PROBABILITY = 0.45  # Slightly below 50% to account for system fee
+# Prize multipliers - designed to keep pool profitable
+# Most prizes are less than the effective bet (90% of original bet)
+PRIZE_MULTIPLIERS = [
+    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,  # Common small prizes
+    0.9, 1.0,                                   # Break-even prizes (rare)
+    1.2, 1.5, 2.0                             # Profit prizes (very rare)
+]
+
+# Weights for prize selection (higher weight = more likely)
+PRIZE_WEIGHTS = [
+    15, 12, 10, 8, 8, 6, 5, 4,  # Small prizes (most common)
+    3, 2,                        # Break-even (uncommon)  
+    1, 1, 1                      # Profit prizes (rare)
+]
 
 # Starting pool
 STARTING_POOL = 100_000.0
 
 # =======================
-# Simple Game Class
+# Smart Pool Game Class
 # =======================
 
-class OrganicPoolGame:
+class PlayerFriendlyPoolGame:
     """
-    Simple, organic pool game with no artificial manipulation.
-    Players bet, system takes 10%, winner is determined randomly.
+    Game designed to give players frequent wins while protecting the pool.
+    Pool always receives more than it pays out on average.
     """
     
     def __init__(self):
@@ -61,15 +72,22 @@ class OrganicPoolGame:
         # Recent history
         self.history = []
     
+    def select_prize_multiplier(self) -> float:
+        """
+        Select a prize multiplier using weighted random selection.
+        Most prizes are small to keep pool profitable.
+        """
+        return random.choices(PRIZE_MULTIPLIERS, weights=PRIZE_WEIGHTS)[0]
+    
     def play_round(self, player: str, bet_amount: float) -> Dict:
         """
-        Play one round - completely organic and fair.
+        Play one round with high win rate but pool-protective prizes.
         """
         # System takes its fee first
         system_fee = bet_amount * SYSTEM_FEE_RATE
-        effective_bet = bet_amount - system_fee
+        effective_bet = bet_amount - system_fee  # This goes to pool
         
-        # Add to pool
+        # Pool receives the effective bet
         self.pool += effective_bet
         
         # Update tracking
@@ -81,33 +99,33 @@ class OrganicPoolGame:
         self.players[player]["total_bet"] += bet_amount
         self.players[player]["rounds"] += 1
         
-        # Determine if player wins (pure random)
-        wins = random.random() < BASE_WIN_PROBABILITY
+        # Determine if player wins (high probability)
+        wins = random.random() < WIN_PROBABILITY
         
         prize = 0.0
         multiplier = 0.0
         
         if wins:
-            # Random multiplier selection
-            multiplier = random.choice(PRIZE_MULTIPLIERS)
-            prize = bet_amount * multiplier
+            # Select prize multiplier (weighted toward small prizes)
+            multiplier = self.select_prize_multiplier()
+            prize = bet_amount * multiplier  # Prize based on original bet
             
-            # Pay out from pool
+            # Pay out from pool (pool protection built into multiplier selection)
             if self.pool >= prize:
                 self.pool -= prize
                 self.players[player]["total_won"] += prize
                 self.players[player]["wins"] += 1
                 self.total_payouts += prize
             else:
-                # Pool can't afford full prize, give what's available
-                prize = max(0, self.pool)
-                self.pool = 0
+                # Emergency fallback - shouldn't happen with our design
+                prize = max(0, self.pool * 0.5)  # Only take half of remaining pool
+                self.pool -= prize
                 self.players[player]["total_won"] += prize
                 self.players[player]["wins"] += 1
                 self.total_payouts += prize
                 multiplier = prize / bet_amount if bet_amount > 0 else 0
         
-        # Update player balance (total won - total bet)
+        # Update player balance
         self.players[player]["balance"] = self.players[player]["total_won"] - self.players[player]["total_bet"]
         
         # Add to history
@@ -124,20 +142,24 @@ class OrganicPoolGame:
         }
         
         self.history.append(result)
-        if len(self.history) > 20:  # Keep last 20 rounds
+        if len(self.history) > 20:
             self.history.pop(0)
             
         return result
     
     def get_stats(self) -> Dict:
-        """Get overall game statistics."""
+        """Get game statistics including pool profitability."""
+        pool_profit = (self.total_bets * (1 - SYSTEM_FEE_RATE)) - self.total_payouts
+        
         return {
             "total_bets": self.total_bets,
             "total_fees": self.total_fees_collected,
             "total_payouts": self.total_payouts,
+            "pool_profit": pool_profit,
             "net_pool_change": self.pool - STARTING_POOL,
             "total_rounds": self.total_rounds,
-            "effective_rtp": (self.total_payouts / self.total_bets) if self.total_bets > 0 else 0
+            "effective_rtp": (self.total_payouts / self.total_bets) if self.total_bets > 0 else 0,
+            "pool_rtp": (self.total_payouts / (self.total_bets * (1 - SYSTEM_FEE_RATE))) if self.total_bets > 0 else 0
         }
     
     def reset_game(self):
@@ -145,34 +167,42 @@ class OrganicPoolGame:
         self.__init__()
 
 # =======================
-# Simple Streamlit UI
+# Streamlit UI
 # =======================
 
 def main():
     st.set_page_config(
-        page_title="Organic Pool Game", 
-        page_icon="🎯", 
+        page_title="Player-Friendly Pool Game", 
+        page_icon="🎊", 
         layout="centered"
     )
     
     # Initialize game
     if "game" not in st.session_state:
-        st.session_state.game = OrganicPoolGame()
+        st.session_state.game = PlayerFriendlyPoolGame()
     
     game = st.session_state.game
     
     # Header
-    st.title("🎯 Organic Pool Game")
-    st.caption("Simple, fair, and transparent gaming - System takes 10% fee from every bet")
+    st.title("🎊 Player-Friendly Pool Game")
+    st.caption(f"High win rate ({WIN_PROBABILITY:.0%}) with smart prize system - Pool stays profitable!")
     
-    # Pool status
-    col1, col2, col3 = st.columns(3)
+    # Pool status with profitability indicator
+    stats = game.get_stats()
+    pool_health = "🟢 Profitable" if stats["pool_profit"] >= 0 else "🔴 Losing"
+    
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("💰 Pool", f"${game.pool:,.0f}")
     with col2:
-        st.metric("🎮 Total Rounds", game.total_rounds)
+        st.metric("🎮 Rounds", game.total_rounds)
     with col3:
         st.metric("🏦 System Fees", f"${game.total_fees_collected:,.0f}")
+    with col4:
+        st.metric("📊 Pool Profit", f"${stats['pool_profit']:+,.0f}", help="How much pool has gained/lost")
+    
+    # Pool health indicator
+    st.markdown(f"**Pool Status:** {pool_health}")
     
     st.divider()
     
@@ -185,26 +215,29 @@ def main():
     with col2:
         selected_bet = st.selectbox("Bet Amount", BET_CHOICES)
     with col3:
-        win_chance = BASE_WIN_PROBABILITY * 100
-        st.metric("Win Chance", f"{win_chance:.0f}%")
+        st.metric("Win Chance", f"{WIN_PROBABILITY:.0%}")
     
-    # Show what player could win
+    # Show prize information
     min_prize = selected_bet * min(PRIZE_MULTIPLIERS)
     max_prize = selected_bet * max(PRIZE_MULTIPLIERS)
-    st.info(f"💡 Possible prizes: ${min_prize:,.0f} to ${max_prize:,.0f} (System keeps ${selected_bet * SYSTEM_FEE_RATE:,.0f})")
+    avg_prize = selected_bet * (sum(m * w for m, w in zip(PRIZE_MULTIPLIERS, PRIZE_WEIGHTS)) / sum(PRIZE_WEIGHTS))
+    
+    st.info(f"💡 Prize range: ${min_prize:,.0f} to ${max_prize:,.0f} | Average prize: ~${avg_prize:,.0f} | System fee: ${selected_bet * SYSTEM_FEE_RATE:,.0f}")
     
     # Play button
     if st.button("🎲 PLAY ROUND", type="primary", use_container_width=True):
         result = game.play_round(selected_player, selected_bet)
         
         if result["won"]:
-            if result["multiplier"] >= 5.0:
+            if result["multiplier"] >= 1.2:
                 st.balloons()
-                st.success(f"🎉 BIG WIN! {selected_player} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x multiplier)")
+                st.success(f"🎉 BIG WIN! {selected_player} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
+            elif result["multiplier"] >= 0.8:
+                st.success(f"✅ GOOD WIN! {selected_player} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
             else:
-                st.success(f"✅ WIN! {selected_player} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x multiplier)")
+                st.success(f"🎊 WIN! {selected_player} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
         else:
-            st.error(f"❌ Loss. {selected_player} lost ${selected_bet:,.0f} (System fee: ${result['system_fee']:,.0f})")
+            st.error(f"❌ Rare loss! {selected_player} lost ${selected_bet:,.0f}")
         
         st.rerun()
     
@@ -215,8 +248,6 @@ def main():
     
     for player_name, stats in game.players.items():
         win_rate = (stats["wins"] / stats["rounds"]) if stats["rounds"] > 0 else 0
-        
-        # Color code balance
         balance_color = "green" if stats["balance"] >= 0 else "red"
         
         with st.expander(f"**{player_name}** - Balance: ${stats['balance']:+,.0f}", 
@@ -234,37 +265,58 @@ def main():
                            unsafe_allow_html=True)
                 st.metric("Win Rate", f"{win_rate:.1%}")
     
-    # Game Statistics
+    # Enhanced Game Statistics
     st.divider()
-    st.subheader("🎯 Game Statistics")
-    
-    game_stats = game.get_stats()
+    st.subheader("🎯 System Performance")
     
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Total Bets Placed", f"${game_stats['total_bets']:,.0f}")
-        st.metric("Total Payouts", f"${game_stats['total_payouts']:,.0f}")
-        st.metric("Effective RTP", f"{game_stats['effective_rtp']:.1%}")
+        st.metric("Player RTP", f"{stats['effective_rtp']:.1%}", help="Total payouts / Total bets")
+        st.metric("Total Player Bets", f"${stats['total_bets']:,.0f}")
+        st.metric("Total Payouts", f"${stats['total_payouts']:,.0f}")
     
     with col2:
-        st.metric("System Fees Collected", f"${game_stats['total_fees']:,.0f}")
-        st.metric("Pool Net Change", f"${game_stats['net_pool_change']:+,.0f}")
-        theoretical_rtp = (1 - SYSTEM_FEE_RATE) * BASE_WIN_PROBABILITY + (1 - BASE_WIN_PROBABILITY) * 0
-        avg_multiplier = sum(PRIZE_MULTIPLIERS) / len(PRIZE_MULTIPLIERS)
-        theoretical_rtp_adj = BASE_WIN_PROBABILITY * avg_multiplier
-        st.metric("Expected RTP", f"≈{theoretical_rtp_adj:.1%}")
+        st.metric("Pool RTP", f"{stats['pool_rtp']:.1%}", help="Payouts vs money that went to pool")
+        st.metric("Pool Receives", f"${stats['total_bets'] * (1 - SYSTEM_FEE_RATE):,.0f}")
+        st.metric("Pool Net Gain", f"${stats['pool_profit']:+,.0f}")
+    
+    # Show why system is profitable
+    if stats['total_rounds'] > 0:
+        st.info(f"""
+        **Why the pool stays profitable:**
+        - Players win {WIN_PROBABILITY:.0%} of the time (great experience!)
+        - But most prizes are small (average ~{(sum(m * w for m, w in zip(PRIZE_MULTIPLIERS, PRIZE_WEIGHTS)) / sum(PRIZE_WEIGHTS)):.1f}x)
+        - Pool receives ${(1-SYSTEM_FEE_RATE)*100:.0f}% of bets, pays out ~{stats['pool_rtp']:.0%}
+        - System keeps {SYSTEM_FEE_RATE:.0%} as operational fee
+        """)
     
     # Recent History
     if game.history:
         st.divider()
         st.subheader("📝 Recent Rounds")
         
-        for round_info in reversed(game.history[-10:]):  # Last 10 rounds
-            outcome = "🎉 WIN" if round_info["won"] else "❌ LOSS"
-            multiplier_text = f" ({round_info['multiplier']:.1f}x)" if round_info["won"] else ""
+        for round_info in reversed(game.history[-10:]):
+            if round_info["won"]:
+                outcome = f"🎊 WIN ${round_info['prize']:,.0f} ({round_info['multiplier']:.1f}x)"
+            else:
+                outcome = "❌ LOSS $0"
             
-            st.text(f"Round {round_info['round']}: {round_info['player']} bet ${round_info['bet']:,} → "
-                   f"{outcome} ${round_info['prize']:,.0f}{multiplier_text}")
+            st.text(f"Round {round_info['round']}: {round_info['player']} bet ${round_info['bet']:,} → {outcome}")
+    
+    # Prize Distribution Info
+    st.divider()
+    st.subheader("🎁 Prize Distribution")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Common Prizes (Frequent):**")
+        for i, (mult, weight) in enumerate(zip(PRIZE_MULTIPLIERS[:8], PRIZE_WEIGHTS[:8])):
+            st.text(f"{mult:.1f}x multiplier ({weight}% chance)")
+    
+    with col2:
+        st.markdown("**Rare Prizes (Uncommon):**")
+        for mult, weight in zip(PRIZE_MULTIPLIERS[8:], PRIZE_WEIGHTS[8:]):
+            st.text(f"{mult:.1f}x multiplier ({weight}% chance)")
     
     # Reset button
     st.divider()
@@ -272,17 +324,6 @@ def main():
         game.reset_game()
         st.success("Game has been reset!")
         st.rerun()
-    
-    # Footer
-    st.divider()
-    st.markdown("""
-    **How it works:**
-    - System takes 10% fee from every bet
-    - Remaining 90% goes to the pool
-    - 45% chance to win (fair odds considering system fee)
-    - Winners get random multiplier from the prize list
-    - No artificial manipulation - purely organic gameplay
-    """)
 
 if __name__ == "__main__":
     main()
