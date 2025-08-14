@@ -30,7 +30,7 @@ WIN_PROBABILITY = 0.85
 # Prize multipliers - designed to keep pool profitable
 # Most prizes are less than the effective bet (90% of original bet)
 PRIZE_MULTIPLIERS = [
-    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,  # Common small prizes (8 items)
+    0.5, 0.6, 0.7, 0.8,  # Common small prizes (8 items)
     0.9, 1.0,                                   # Break-even prizes (2 items)
     1.2, 1.5, 2.0                             # Profit prizes (3 items)
 ]
