@@ -322,7 +322,7 @@ def main():
             with col2:
                 st.metric("Total Won", f"${stats['total_won']:,.0f}")
                 st.metric("Cash Wins", f"{stats['wins']}")
-            with col3:  # <-- fixed: was 'col_t3'
+            with col3:
                 st.markdown(
                     f"**Balance:** <span style='color:{balance_color}'>${stats['balance']:+,.0f}</span>",
                     unsafe_allow_html=True
@@ -358,7 +358,7 @@ def main():
     if game.history:
         st.divider()
         st.subheader("📝 Recent Rounds")
-        for r in reversed(game.history[-10:)):
+        for r in reversed(game.history[-10:]):  # <-- fixed closing parens
             if r["won"]:
                 outcome = f"🎊 WIN ${r['prize']:,.0f} ({r['multiplier']:.2f}×)"
             else:
