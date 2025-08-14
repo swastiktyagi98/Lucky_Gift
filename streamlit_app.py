@@ -186,6 +186,8 @@ def main():
     # Initialize game
     if "game" not in st.session_state:
         st.session_state.game = PlayerFriendlyPoolGame()
+    if "last_result" not in st.session_state:
+        st.session_state.last_result = None
     
     game = st.session_state.game
     
@@ -230,22 +232,41 @@ def main():
     
     st.info(f"💡 Prize range: ${min_prize:,.0f} to ${max_prize:,.0f} | Average prize: ~${avg_prize:,.0f} | System fee: ${selected_bet * SYSTEM_FEE_RATE:,.0f}")
     
-    # Play button
-    if st.button("🎲 PLAY ROUND", type="primary", use_container_width=True):
+    # --- Play button + persistent current result just below it ---
+    play_clicked = st.button("🎲 PLAY ROUND", type="primary", use_container_width=True)
+    if play_clicked:
+        # Play and store the result for display after rerun
         result = game.play_round(selected_player, selected_bet)
-        
+        st.session_state.last_result = result
+        st.rerun()
+    
+    # Show current (most recent) game result right under the button
+    if st.session_state.last_result:
+        result = st.session_state.last_result
         if result["won"]:
+            # Celebrate big wins; note: will re-trigger on full rerun until a new result happens
             if result["multiplier"] >= 1.2:
                 st.balloons()
-                st.success(f"🎉 BIG WIN! {selected_player} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
+                st.success(f"🎉 BIG WIN! {result['player']} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
             elif result["multiplier"] >= 0.8:
-                st.success(f"✅ GOOD WIN! {selected_player} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
+                st.success(f"✅ GOOD WIN! {result['player']} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
             else:
-                st.success(f"🎊 WIN! {selected_player} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
+                st.success(f"🎊 WIN! {result['player']} won ${result['prize']:,.0f} ({result['multiplier']:.1f}x)")
         else:
-            st.error(f"❌ Rare loss! {selected_player} lost ${selected_bet:,.0f}")
+            st.error(f"❌ Rare loss! {result['player']} lost ${result['bet']:,.0f}")
         
-        st.rerun()
+        with st.expander("Result details", expanded=False):
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("Bet", f"${result['bet']:,.0f}")
+                st.metric("System Fee", f"${result['system_fee']:,.0f}")
+            with col_b:
+                st.metric("Effective to Pool", f"${result['effective_bet']:,.0f}")
+                st.metric("Prize", f"${result['prize']:,.0f}")
+            with col_c:
+                st.metric("Multiplier", f"{result['multiplier']:.1f}x")
+                st.metric("Pool After", f"${result['pool_after']:,.0f}")
+    # --- end current result block ---
     
     st.divider()
     
@@ -328,6 +349,7 @@ def main():
     st.divider()
     if st.button("🔄 Reset Game", type="secondary"):
         game.reset_game()
+        st.session_state.last_result = None
         st.success("Game has been reset!")
         st.rerun()
 
