@@ -1,3 +1,5 @@
 fastapi==0.111.0
-uvicorn[standard]==0.30.1
+uvicorn==0.30.1
 pydantic==2.7.1
+# optional: be explicit so the wheel is chosen (has manylinux wheels for py3.11)
+pydantic-core==2.18.4
