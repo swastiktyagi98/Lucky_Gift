@@ -48,10 +48,10 @@ BASELINE_EXPECTED_PAYOUT_FACTOR = BASELINE_WIN_PROBABILITY * _weighted_avg(
 # =======================
 
 SYSTEM_FEE_RATE = 0.10
-BET_CHOICES = [100, 500, 1000, 2000, 5000, 10_000]
+BET_CHOICES = [100, 500, 1000, 2000, 5000, 10_000,20000]
 
 # TARGET cash win chance (payout > 0).
-CASH_WIN_CHANCE = 0.97  # 97% paying rounds; triple-loss odds ~0.0027%
+CASH_WIN_CHANCE = 0.98  # 97% paying rounds; triple-loss odds ~0.0027%
 
 # Micro-win so every paying round > $0 (pre-scale).
 MIN_MICRO_WIN = 0.05  # 5% of bet on the rarest outcome before scaling
