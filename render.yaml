@@ -1,10 +1,11 @@
 services:
   - type: web
-    name: pool-game-api
+    name: lucky-gift
     env: python
     plan: free
-    region: oregon    # or frankfurt / singapore
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      pip install -U pip setuptools wheel
+      PIP_ONLY_BINARY=:all: pip install --no-cache-dir -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     autoDeploy: true
