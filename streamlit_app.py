@@ -187,9 +187,9 @@ def main():
     st.title("🎊 Player-Friendly Pool Game")
     st.caption(f"High win rate ({WIN_PROBABILITY:.0%}) with smart prize system - Pool stays profitable!")
     
-    # Pool status with profitability indicator
-    stats = game.get_stats()
-    pool_health = "🟢 Profitable" if stats["pool_profit"] >= 0 else "🔴 Losing"
+    # Get game statistics
+    game_stats = game.get_stats()
+    pool_health = "🟢 Profitable" if game_stats["pool_profit"] >= 0 else "🔴 Losing"
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -199,7 +199,7 @@ def main():
     with col3:
         st.metric("🏦 System Fees", f"${game.total_fees_collected:,.0f}")
     with col4:
-        st.metric("📊 Pool Profit", f"${stats['pool_profit']:+,.0f}", help="How much pool has gained/lost")
+        st.metric("📊 Pool Profit", f"${game_stats['pool_profit']:+,.0f}", help="How much pool has gained/lost")
     
     # Pool health indicator
     st.markdown(f"**Pool Status:** {pool_health}")
@@ -271,22 +271,22 @@ def main():
     
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Player RTP", f"{stats['effective_rtp']:.1%}", help="Total payouts / Total bets")
-        st.metric("Total Player Bets", f"${stats['total_bets']:,.0f}")
-        st.metric("Total Payouts", f"${stats['total_payouts']:,.0f}")
+        st.metric("Player RTP", f"{game_stats['effective_rtp']:.1%}", help="Total payouts / Total bets")
+        st.metric("Total Player Bets", f"${game_stats['total_bets']:,.0f}")
+        st.metric("Total Payouts", f"${game_stats['total_payouts']:,.0f}")
     
     with col2:
-        st.metric("Pool RTP", f"{stats['pool_rtp']:.1%}", help="Payouts vs money that went to pool")
-        st.metric("Pool Receives", f"${stats['total_bets'] * (1 - SYSTEM_FEE_RATE):,.0f}")
-        st.metric("Pool Net Gain", f"${stats['pool_profit']:+,.0f}")
+        st.metric("Pool RTP", f"{game_stats['pool_rtp']:.1%}", help="Payouts vs money that went to pool")
+        st.metric("Pool Receives", f"${game_stats['total_bets'] * (1 - SYSTEM_FEE_RATE):,.0f}")
+        st.metric("Pool Net Gain", f"${game_stats['pool_profit']:+,.0f}")
     
     # Show why system is profitable
-    if stats['total_rounds'] > 0:
+    if game_stats['total_rounds'] > 0:
         st.info(f"""
         **Why the pool stays profitable:**
         - Players win {WIN_PROBABILITY:.0%} of the time (great experience!)
         - But most prizes are small (average ~{(sum(m * w for m, w in zip(PRIZE_MULTIPLIERS, PRIZE_WEIGHTS)) / sum(PRIZE_WEIGHTS)):.1f}x)
-        - Pool receives ${(1-SYSTEM_FEE_RATE)*100:.0f}% of bets, pays out ~{stats['pool_rtp']:.0%}
+        - Pool receives ${(1-SYSTEM_FEE_RATE)*100:.0f}% of bets, pays out ~{game_stats['pool_rtp']:.0%}
         - System keeps {SYSTEM_FEE_RATE:.0%} as operational fee
         """)
     
