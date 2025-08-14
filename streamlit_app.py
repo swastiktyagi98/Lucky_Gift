@@ -30,16 +30,17 @@ WIN_PROBABILITY = 0.85
 # Prize multipliers - designed to keep pool profitable
 # Most prizes are less than the effective bet (90% of original bet)
 PRIZE_MULTIPLIERS = [
-    0.5, 0.6, 0.7, 0.8,  # Common small prizes
-    0.9, 1.0,                                   # Break-even prizes (rare)
-    1.2, 1.5, 2.0                             # Profit prizes (very rare)
+    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,  # Common small prizes (8 items)
+    0.9, 1.0,                                   # Break-even prizes (2 items)
+    1.2, 1.5, 2.0                             # Profit prizes (3 items)
 ]
 
 # Weights for prize selection (higher weight = more likely)
+# Must match exactly the number of multipliers above (13 items total)
 PRIZE_WEIGHTS = [
-    15, 12, 10, 8, 8, 6, 5, 4,  # Small prizes (most common)
-    3, 2,                        # Break-even (uncommon)  
-    1, 1, 1                      # Profit prizes (rare)
+    15, 12, 10, 8, 8, 6, 5, 4,  # Small prizes (8 weights)
+    3, 2,                        # Break-even (2 weights)
+    1, 1, 1                      # Profit prizes (3 weights)
 ]
 
 # Starting pool
@@ -77,6 +78,11 @@ class PlayerFriendlyPoolGame:
         Select a prize multiplier using weighted random selection.
         Most prizes are small to keep pool profitable.
         """
+        # Safety check to ensure lists match
+        if len(PRIZE_MULTIPLIERS) != len(PRIZE_WEIGHTS):
+            # Fallback to simple random selection if weights don't match
+            return random.choice(PRIZE_MULTIPLIERS)
+        
         return random.choices(PRIZE_MULTIPLIERS, weights=PRIZE_WEIGHTS)[0]
     
     def play_round(self, player: str, bet_amount: float) -> Dict:
