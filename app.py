@@ -47,7 +47,7 @@ PRIZE_WEIGHTS = [
 # Helpers to preserve baseline RTP
 # ----------------------------
 
-def _weighted_avg(mults: List[float], weights: List[int]) -> float:
+def _weighted_avg(mults: List[float], weights: List[float]) -> float:
     tw = sum(weights)
     return sum(m * w for m, w in zip(mults, weights)) / tw if tw else 0.0
 
@@ -76,9 +76,10 @@ class PlayRequest(BaseModel):
     userId: str = Field(..., description="Caller user id")
     betAmount: float = Field(..., gt=0, description="User bet amount (must be > 0)")
     currentPool: float = Field(..., ge=0, description="Current pool balance before this round")
-    userEnergy: Optional[int] = Field(
-        None, ge=0, le=100,
-        description="0..100. Currently informational; does not alter odds."
+    # User total energy BEFORE this round (start at 0.0 for new users)
+    userEnergy: Optional[float] = Field(
+        0.0,
+        description="User total energy before this round. Start at 0.0 and pass back each time."
     )
 
     @field_validator("betAmount")
@@ -92,24 +93,32 @@ class PlayRequest(BaseModel):
     def _round_pool(cls, v: float) -> float:
         return round(float(v), 2)
 
+    @field_validator("userEnergy")
+    @classmethod
+    def _round_energy(cls, v: Optional[float]) -> float:
+        return round(float(v or 0.0), 2)
+
 
 class PlayResponse(BaseModel):
     userId: str
-    status: str  # "win" | "loss"
+    status: str  # "win" | "loss" (loss only if prizeAmount == 0)
     prizeAmount: float
     multiplier: float
     poolAfter: float
-    # extra transparency (optional for clients to use)
+    # transparency fields
     systemFee: float
     effectiveBet: float
     cashWin: bool
+    # energy accounting
+    roundEnergy: float           # betAmount - prizeAmount
+    totalEnergyAfter: float      # previous userEnergy + roundEnergy
 
 
 # ----------------------------
 # Core round resolution
 # ----------------------------
 
-def resolve_round(user_id: str, bet_amount: float, pool_before: float) -> PlayResponse:
+def resolve_round(user_id: str, bet_amount: float, pool_before: float, user_energy_before: float) -> PlayResponse:
     # Fees & pool inflow
     system_fee = round(bet_amount * SYSTEM_FEE_RATE, 2)
     effective_bet = round(bet_amount - system_fee, 2)
@@ -140,6 +149,14 @@ def resolve_round(user_id: str, bet_amount: float, pool_before: float) -> PlayRe
 
     status = "win" if prize > 0 else "loss"
 
+    # ----------------------------
+    # ENERGY ACCOUNTING (as requested)
+    # current round energy = bet - prize
+    # new total energy = previous total energy + current round energy
+    # ----------------------------
+    round_energy = round(bet_amount - prize, 2)
+    total_energy_after = round(float(user_energy_before or 0.0) + round_energy, 2)
+
     return PlayResponse(
         userId=user_id,
         status=status,
@@ -148,7 +165,9 @@ def resolve_round(user_id: str, bet_amount: float, pool_before: float) -> PlayRe
         poolAfter=pool,
         systemFee=system_fee,
         effectiveBet=effective_bet,
-        cashWin=pays
+        cashWin=pays,
+        roundEnergy=round_energy,
+        totalEnergyAfter=total_energy_after
     )
 
 
@@ -158,12 +177,11 @@ def resolve_round(user_id: str, bet_amount: float, pool_before: float) -> PlayRe
 
 app = FastAPI(
     title="Player-Friendly Pool Game API",
-    version="1.0.0",
+    version="1.2.0",
     description=(
-        "API to resolve a pool-based round. "
-        "Send userId, betAmount, currentPool, userEnergy. "
-        "Returns status ('win'|'loss') and prizeAmount (0 means loss), "
-        "plus poolAfter and transparency fields."
+        "Pool-based round resolver. Send userId, betAmount, currentPool, userEnergy (user's total energy before this round). "
+        "Energy is accounted as: roundEnergy = bet - prize; totalEnergyAfter = userEnergy + roundEnergy. "
+        "Loss occurs only when prizeAmount == 0."
     ),
 )
 
@@ -183,7 +201,8 @@ def health():
         "ok": True,
         "message": "Player-Friendly Pool Game API is running.",
         "cashWinChance": CASH_WIN_CHANCE,
-        "prizeScale": PRIZE_SCALE
+        "prizeScale": PRIZE_SCALE,
+        "energyDefinition": "roundEnergy = bet - prize; totalEnergyAfter = prevUserEnergy + roundEnergy"
     }
 
 
@@ -191,13 +210,18 @@ def health():
 def play_round(req: PlayRequest):
     """
     Resolve a single round using the current pool.
+
     - Loss is only when prizeAmount == 0.
-    - The pool is updated by taking in (bet - systemFee) and paying out the prize.
-    - The endpoint is **stateless**: you must persist `poolAfter` on your side.
+    - Pool is updated by taking in (bet - systemFee) and paying out the prize.
+    - ENERGY:
+        * roundEnergy = betAmount - prizeAmount
+        * totalEnergyAfter = req.userEnergy + roundEnergy
+      (Client should persist totalEnergyAfter and pass it as userEnergy on the next call.)
+    - Endpoint is stateless aside from values you pass in.
     """
-    # NOTE: userEnergy is accepted for future tuning. Current odds honor the original design.
     return resolve_round(
         user_id=req.userId,
         bet_amount=req.betAmount,
-        pool_before=req.currentPool
+        pool_before=req.currentPool,
+        user_energy_before=req.userEnergy or 0.0
     )
