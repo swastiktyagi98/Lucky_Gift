@@ -72,7 +72,7 @@ PRIZE_WEIGHTS = [
     14, 11, 9
 ]
 
-STARTING_POOL = 100_000.0
+STARTING_POOL = 0.0
 
 # =======================
 # Derived calibration
