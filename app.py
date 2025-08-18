@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Constants
 SYSTEM_FEE_RATE = 0.0
-MIN_MICRO_WIN = 0.9
+MIN_MICRO_WIN = 0.0
 
-PRIZE_MULTIPLIERS: List[float] = [MIN_MICRO_WIN, 1.2, 1.3, 1.5, 2.0, 5.0]
+PRIZE_MULTIPLIERS: List[float] = [MIN_MICRO_WIN, 2.0, 5.0,6.0,7.0,8.0,9.0,10.0]
 PRIZE_WEIGHTS: List[int] = [1, 8, 8, 8, 8, 8, 8, 8, 6, 6, 14, 11, 9]
 
 def _select_multiplier() -> float:
