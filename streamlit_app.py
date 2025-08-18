@@ -88,7 +88,8 @@ class NoFeePoolGame:
         self.history: List[Dict] = []
 
     def _select_multiplier(self) -> float:
-        if len(PRIZE_MULTIPLIERS) != len(PRIZE_WEIGHTS]:
+        # ✅ fixed the syntax error here
+        if len(PRIZE_MULTIPLIERS) != len(PRIZE_WEIGHTS):
             return random.choice(PRIZE_MULTIPLIERS)
         return random.choices(PRIZE_MULTIPLIERS, weights=PRIZE_WEIGHTS)[0]
 
@@ -170,11 +171,11 @@ class NoFeePoolGame:
 
 
 def _last_n_cash_win_rate(history: List[Dict], n=10) -> float:
-        if not history:
-            return 0.0
-        sample = history[:n]  # history is newest first
-        wins = sum(1 for r in sample if r["cash_win"])
-        return wins / len(sample)
+    if not history:
+        return 0.0
+    sample = history[:n]  # history is newest first
+    wins = sum(1 for r in sample if r["cash_win"])
+    return wins / len(sample)
 
 
 # ================================
@@ -204,7 +205,6 @@ with col2:
 with col3:
     st.metric("📈 Player RTP", f"{stats['rtp']:.1%}")
 with col4:
-    inv_ok = abs(stats["invariant_delta"]) <= 0.02
     st.metric("♾️ Invariant Δ", f"${stats['invariant_delta']:,.2f}",
               help="pool − (startPool + Σ energy)")
 st.markdown("**Invariant:** Pool should equal sum of all users’ energy (±¢).")
@@ -224,7 +224,7 @@ with c3:
         new_name = f"Player {len(game.players)+1}"
         game.players[new_name] = {"energy": 0.0, "total_bet": 0.0, "total_prize": 0.0, "rounds": 0, "wins": 0, "losses": 0}
         selected_player = new_name
-        st.experimental_rerun()
+        st.rerun()
 
 # Effective prize info
 active_avg_unscaled = _weighted_avg(PRIZE_MULTIPLIERS, PRIZE_WEIGHTS)
@@ -246,27 +246,27 @@ with pc1:
     if st.button("🎯 PLAY NOW", use_container_width=True, type="primary"):
         res = game.play_round(selected_player, selected_bet)
         st.session_state.last_result = res
-        st.experimental_rerun()
+        st.rerun()
 with pc2:
     if st.button("⚡ Auto ×10", use_container_width=True):
         for _ in range(10):
             p = random.choice(list(game.players.keys()))
             b = random.choice(BET_CHOICES)
             game.play_round(p, b)
-        st.experimental_rerun()
+        st.rerun()
 with pc3:
     if st.button("⚡ Auto ×50", use_container_width=True):
         for _ in range(50):
             p = random.choice(list(game.players.keys()))
             b = random.choice(BET_CHOICES)
             game.play_round(p, b)
-        st.experimental_rerun()
+        st.rerun()
 with pc4:
     if st.button("🗑️ Reset Game", use_container_width=True):
         game.reset()
         st.session_state.last_result = None
         st.success("Game reset.")
-        st.experimental_rerun()
+        st.rerun()
 
 # Last result card
 if st.session_state.get("last_result"):
