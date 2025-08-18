@@ -17,11 +17,11 @@ PRIZE_MULTIPLIERS: List[float] = [0.0, 2.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
 # Interpretation: higher (more positive) energy means the user has lost more overall (contributed to the house)
 # and should be rewarded with higher win odds and bigger multipliers.
 ENERGY_THRESHOLDS = {
-    'very_low': -20000,   # heavy winner (house is down)
-    'low': -5000,         # recent winner
-    'medium': 10000,      # around breakeven
-    'high': 30000,        # losing to house
-    'very_high': 50000    # losing heavily to house (VIP)
+    'very_low': -1000,   # heavy winner (house is down)
+    'low': -500,         # recent winner
+    'medium': 1000,      # around breakeven
+    'high': 3000,        # losing to house
+    'very_high': 10000    # losing heavily to house (VIP)
 }
 
 # Weights per tier (length must equal len(PRIZE_MULTIPLIERS)).
