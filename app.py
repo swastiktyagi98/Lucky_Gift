@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
 
 # ----------------------------
-# Game economics (same as current)
+# Game economics (same)
 # ----------------------------
 BASELINE_WIN_PROBABILITY = 0.85
 BASELINE_PRIZE_MULTIPLIERS = [
@@ -43,7 +43,7 @@ PRIZE_WEIGHTS = [
 ]
 
 # ----------------------------
-# RTP helper (same)
+# RTP helper
 # ----------------------------
 def _weighted_avg(mults: List[float], weights: List[float]) -> float:
     tw = sum(weights)
@@ -70,7 +70,7 @@ def _select_multiplier() -> float:
 class PlayRequest(BaseModel):
     userId: str = Field(..., description="Caller user id")
     betAmount: float = Field(..., gt=0, description="User bet amount (> 0)")
-    currentPool: float = Field(..., description="Current pool before this round (server enforces non-negative)")
+    currentPool: float = Field(..., description="Current pool before this round")
     userEnergy: Optional[float] = Field(
         0.0, description="User total energy before this round (client-maintained)"
     )
@@ -101,13 +101,15 @@ class PlayResponse(BaseModel):
     # compatibility fields (fee is 0; effectiveBet == bet)
     systemFee: float
     effectiveBet: float
-    # energy mirrors pool change exactly (no fee):
+    # energy mirrors pool change (no fee):
     roundEnergy: float        # bet - prize
     totalEnergyAfter: float   # previous userEnergy + roundEnergy
 
 
 # ----------------------------
-# Core round resolution (non-negative pool)
+# Core round resolution
+#   - Pool never goes negative
+#   - If available funds < theoretical prize -> prize = 0 (loss)
 # ----------------------------
 def resolve_round(
     user_id: str,
@@ -115,50 +117,50 @@ def resolve_round(
     pool_before: float,
     user_energy_before: float,
 ) -> PlayResponse:
-    # No fee, so effective bet == bet
     system_fee = 0.0
     effective_bet = bet_amount
 
-    # If client sends a negative pool from older runs, clamp to 0
+    # Clamp any negative pool coming from legacy runs to 0 (safety)
     pool_before_safe = max(0.0, round(pool_before, 2))
 
-    # Pool first receives the bet
+    # Add bet to pool first
     available = round(pool_before_safe + bet_amount, 2)
 
-    # Determine if this round pays (cash win)
-    pays = (random.random() < CASH_WIN_CHANCE)
-
+    pays_roll = (random.random() < CASH_WIN_CHANCE)  # "rolled" cash win
     prize = 0.0
     eff_mult = 0.0
 
-    if pays:
+    if pays_roll:
         base_mult = _select_multiplier()
-        eff_mult = round(base_mult * PRIZE_SCALE, 4)
-        theoretical_prize = round(bet_amount * eff_mult, 2)
+        wanted_mult = round(base_mult * PRIZE_SCALE, 4)
+        theoretical_prize = round(bet_amount * wanted_mult, 2)
 
-        # Cap prize so pool never goes negative
-        prize = min(theoretical_prize, available)
+        if theoretical_prize <= available:
+            # Pay full prize
+            prize = theoretical_prize
+            eff_mult = wanted_mult
+        else:
+            # Insufficient funds -> treat as loss (prize 0)
+            prize = 0.0
+            eff_mult = 0.0
 
-        # If capped, reflect the actual multiplier paid
-        if bet_amount > 0 and prize != theoretical_prize:
-            eff_mult = round(prize / bet_amount, 4)
+    pool_after = round(available - prize, 2)  # >= 0 by construction
 
-    # Pool after payout (never negative)
-    pool_after = round(available - prize, 2)
-
-    status = "win" if prize > 0 else "loss"
-
-    # Energy = bet - prize  (matches pool change this round)
+    # Energy = bet - prize (matches pool delta)
     round_energy = round(bet_amount - prize, 2)
     total_energy_after = round(float(user_energy_before or 0.0) + round_energy, 2)
+
+    # "cashWin" reflects actual payout (>0), as per your rule "loss when amount is 0"
+    status = "win" if prize > 0 else "loss"
+    cash_win = (prize > 0)
 
     return PlayResponse(
         userId=user_id,
         status=status,
-        prizeAmount=prize,
-        multiplier=eff_mult if prize > 0 else 0.0,
+        prizeAmount=round(prize, 2),
+        multiplier=eff_mult,
         poolAfter=pool_after,
-        cashWin=pays,
+        cashWin=cash_win,
         systemFee=system_fee,
         effectiveBet=effective_bet,
         roundEnergy=round_energy,
@@ -170,12 +172,12 @@ def resolve_round(
 # FastAPI app
 # ----------------------------
 app = FastAPI(
-    title="Player-Friendly Pool Game API (No-Fee, Non-Negative Pool)",
-    version="2.1.0",
+    title="Player-Friendly Pool Game API (No-Fee, Prize=0 if Insufficient Pool)",
+    version="2.2.0",
     description=(
-        "No-fee pool game. Pool is guaranteed to never go below 0 by capping payouts to available funds.\n"
-        "Energy: roundEnergy = bet - prize; totalEnergyAfter = userEnergy + roundEnergy.\n"
-        "With startPool = 0 and no clamping events, pool == sum(all users' energy)."
+        "No-fee pool game. Pool never goes below 0. "
+        "If available funds are less than the theoretical prize, the user receives 0 (loss). "
+        "Energy: roundEnergy = bet - prize; totalEnergyAfter = userEnergy + roundEnergy."
     ),
 )
 
@@ -191,12 +193,12 @@ app.add_middleware(
 def health():
     return {
         "ok": True,
-        "message": "Pool game API is running (no fee, pool cannot be negative).",
+        "message": "Pool game API is running (no fee; prize=0 if insufficient pool).",
         "cashWinChance": CASH_WIN_CHANCE,
         "prizeScale": PRIZE_SCALE,
         "energyDefinition": "roundEnergy = bet - prize; totalEnergy = sum(roundEnergy)",
         "feeRate": SYSTEM_FEE_RATE,
-        "poolPolicy": "payouts capped to available = max(0, pool_before) + bet",
+        "poolPolicy": "payout only if available >= theoretical prize",
     }
 
 @app.post("/play", response_model=PlayResponse, tags=["gameplay"])
@@ -204,9 +206,8 @@ def play_round(req: PlayRequest):
     """
     Resolve a single round (stateless):
     - available = max(0, currentPool) + bet
-    - prize = min(theoreticalPrize, available)
-    - poolAfter = available - prize >= 0
-    - Loss only when prizeAmount == 0.
+    - if theoretical_prize <= available: pay it; else prize = 0 (loss)
+    - poolAfter = available - prize  (never negative)
     - Energy: roundEnergy = bet - prize. Client persists totalEnergyAfter per user.
     """
     return resolve_round(
