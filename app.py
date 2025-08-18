@@ -8,12 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 # ----------------------------
 # Fixed multiplier distribution (no baseline config, no scaling)
 # ----------------------------
-SYSTEM_FEE_RATE = 0.0          # no fee
-MIN_MICRO_WIN = 0.05           # smallest >0 prize factor (keeps "loss" only for insufficient pool)
+SYSTEM_FEE_RATE = 0.0       
+MIN_MICRO_WIN = 0.08          
 
 PRIZE_MULTIPLIERS: List[float] = [
-    MIN_MICRO_WIN,             # 0.05x
-    0.8, 0.85, 0.9,
+    MIN_MICRO_WIN,             
     1.0, 1.05,
     1.2, 1.5, 2.0, 5.0
 ]
