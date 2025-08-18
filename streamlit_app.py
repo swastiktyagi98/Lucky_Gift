@@ -25,11 +25,9 @@ BASELINE_PRIZE_WEIGHTS = [
 # 👉 No fee in this version
 SYSTEM_FEE_RATE = 0.0
 
-# A round "pays" with a prize with this probability
-CASH_WIN_CHANCE = 0.97
 MIN_MICRO_WIN = 0.05
 
-# Active prize table (on pays)
+# Active prize table (attempted every round)
 PRIZE_MULTIPLIERS = [
     MIN_MICRO_WIN,
     0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9,
@@ -56,13 +54,15 @@ def _weighted_avg(mults: List[float], weights: List[int]) -> float:
     return sum(m * w for m, w in zip(mults, weights)) / tw if tw else 0.0
 
 
+# Keep average EV near the historical baseline (using old baseline params)
 BASELINE_EXPECTED_PAYOUT_FACTOR = BASELINE_WIN_PROBABILITY * _weighted_avg(
     BASELINE_PRIZE_MULTIPLIERS, BASELINE_PRIZE_WEIGHTS
 )
 _active_avg = _weighted_avg(PRIZE_MULTIPLIERS, PRIZE_WEIGHTS)
 
-# Scale the table so EV matches the old baseline despite CASH_WIN_CHANCE changes
-PRIZE_SCALE = BASELINE_EXPECTED_PAYOUT_FACTOR / max(CASH_WIN_CHANCE * _active_avg, 1e-9)
+# Since we now attempt to pay every round (no "cash win chance"),
+# scale by the ratio of baseline EV to the active average.
+PRIZE_SCALE = BASELINE_EXPECTED_PAYOUT_FACTOR / max(_active_avg, 1e-9)
 PRIZE_SCALE = max(min(PRIZE_SCALE, 2.0), 0.2)  # clamp for stability
 
 
@@ -88,7 +88,6 @@ class NoFeePoolGame:
         self.history: List[Dict] = []
 
     def _select_multiplier(self) -> float:
-        # ✅ fixed the syntax error here
         if len(PRIZE_MULTIPLIERS) != len(PRIZE_WEIGHTS):
             return random.choice(PRIZE_MULTIPLIERS)
         return random.choices(PRIZE_MULTIPLIERS, weights=PRIZE_WEIGHTS)[0]
@@ -107,23 +106,25 @@ class NoFeePoolGame:
         # Pool receives full bet (no fee)
         self.pool = round(self.pool + bet_amount, 2)
 
-        pays = (random.random() < CASH_WIN_CHANCE)
-        prize = 0.0
-        eff_mult = 0.0
+        # Every round attempts to pay; loss only if pool cannot cover the prize
+        base_mult = self._select_multiplier()
+        eff_mult = round(base_mult * PRIZE_SCALE, 4)
+        tentative_prize = round(bet_amount * eff_mult, 2)
 
-        if pays:
-            base_mult = self._select_multiplier()
-            eff_mult = round(base_mult * PRIZE_SCALE, 4)
-            prize = round(bet_amount * eff_mult, 2)
-
-            # Pool can go negative
+        blocked_by_pool = False
+        if tentative_prize <= self.pool:
+            prize = tentative_prize
             self.pool = round(self.pool - prize, 2)
+            status = "win"
+        else:
+            prize = 0.0
+            eff_mult = 0.0
+            blocked_by_pool = True
+            status = "loss"
 
-        # Track payouts & W/L (loss only when prize == 0)
+        # Track payouts & W/L
         self.total_payouts += prize
         p["total_prize"] += prize
-
-        status = "win" if prize > 0 else "loss"
         if status == "win":
             p["wins"] += 1
         else:
@@ -140,7 +141,7 @@ class NoFeePoolGame:
             "prize": prize,
             "multiplier": eff_mult if prize > 0 else 0.0,
             "status": status,
-            "cash_win": pays,
+            "blocked_by_pool": blocked_by_pool,
             "pool_after": self.pool,
             "round_energy": round_energy,
             "total_energy_after": p["energy"],
@@ -170,14 +171,6 @@ class NoFeePoolGame:
         self.__init__()
 
 
-def _last_n_cash_win_rate(history: List[Dict], n=10) -> float:
-    if not history:
-        return 0.0
-    sample = history[:n]  # history is newest first
-    wins = sum(1 for r in sample if r["cash_win"])
-    return wins / len(sample)
-
-
 # ================================
 # Streamlit UI
 # ================================
@@ -191,8 +184,8 @@ game: NoFeePoolGame = st.session_state.game
 
 st.title("🎲 Lucky Gift — No-Fee Pool")
 st.caption(
-    f"Cash Win Chance: {CASH_WIN_CHANCE:.0%} • Prize scale={PRIZE_SCALE:.3f} • "
-    f"Energy = bet − prize • Pool can be negative"
+    f"Every round attempts to pay. You only lose if the pool can't cover the prize. "
+    f"Prize scale={PRIZE_SCALE:.3f} • Energy = bet − prize • Pool never goes negative."
 )
 
 # --- Top stats
@@ -223,7 +216,6 @@ with c3:
     if st.button("🔄 Add Random Player"):
         new_name = f"Player {len(game.players)+1}"
         game.players[new_name] = {"energy": 0.0, "total_bet": 0.0, "total_prize": 0.0, "rounds": 0, "wins": 0, "losses": 0}
-        selected_player = new_name
         st.rerun()
 
 # Effective prize info
@@ -236,8 +228,10 @@ min_prize = selected_bet * min_eff
 max_prize = selected_bet * max_eff
 
 st.info(
-    f"💡 On a pay: avg ≈ {effective_avg:.3f}× (min {min_eff:.2f}×, max {max_eff:.2f}×). "
-    f"Prize range (for bet ${selected_bet:,.0f}): ${min_prize:,.2f} – ${max_prize:,.2f}."
+    f"💡 Each round attempts a prize using the table below. "
+    f"Avg ≈ {effective_avg:.3f}× on attempt (min {min_eff:.2f}×, max {max_eff:.2f}×). "
+    f"For bet ${selected_bet:,.0f}, prize range: ${min_prize:,.2f} – ${max_prize:,.2f}. "
+    f"If the pool can't cover the prize, it's a loss and prize becomes $0."
 )
 
 # Play & Auto buttons
@@ -274,7 +268,10 @@ if st.session_state.get("last_result"):
     if r["status"] == "win":
         st.success(f"🎉 WIN! {r['player']} won ${r['prize']:,.2f} ({r['multiplier']:.2f}×)")
     else:
-        st.error(f"❌ Loss — {r['player']} prize $0")
+        msg = f"❌ Loss — {r['player']} prize $0"
+        if r.get("blocked_by_pool"):
+            msg += " (insufficient pool)"
+        st.error(msg)
 
     with st.expander("Result details", expanded=False):
         cA, cB, cC = st.columns(3)
@@ -317,7 +314,7 @@ for name, pl in game.players.items():
         with c4:
             st.metric("RTP", f"{rtp:.1%}")
             st.metric("Total Energy", f"{pl['energy']:,.2f}", help="Sum of (bet − prize)")
-            st.metric("Avg Energy", f"{avg_energy:,.2f}")
+            st.metric("Avg Energy", f"{avg_energy:.2f}")
 
 # --- System performance
 st.divider()
@@ -336,35 +333,18 @@ st.info(
     f"(${STARTING_POOL + stats['sum_energy']:,.2f}) → Δ ${stats['invariant_delta']:,.2f}"
 )
 
-# Recent cash win rate
-if game.history:
-    st.divider()
-    last10 = _last_n_cash_win_rate(game.history, 10)
-    st.write(f"Recent cash win rate (last 10): **{last10:.0%}** (target {CASH_WIN_CHANCE:.0%})")
-
-# Recent rounds (newest first)
-if game.history:
-    st.divider()
-    st.subheader("📝 Recent Rounds")
-    for rr in game.history[:20]:
-        outcome = f"🎉 WIN ${rr['prize']:,.2f} ({rr['multiplier']:.2f}×)" if rr["prize"] > 0 else "❌ LOSS $0"
-        st.text(
-            f"Round {rr['round']:>4}: {rr['player']} bet ${rr['bet']:,.2f} → {outcome} | "
-            f"Pool {rr['pool_after']:,.2f} | dEnergy {rr['round_energy']:,.2f} | E_after {rr['total_energy_after']:,.2f}"
-        )
-
 # Prize distribution
 st.divider()
-st.subheader("🎁 Prize Distribution (Effective on Pay)")
+st.subheader("🎁 Prize Distribution (Attempted Each Round)")
 total_w = sum(PRIZE_WEIGHTS)
 colA, colB = st.columns(2)
 with colA:
     st.markdown("**Common Prizes:**")
     for mult, weight in zip(PRIZE_MULTIPLIERS[0:10], PRIZE_WEIGHTS[0:10]):
         pct = (weight / total_w) * 100 if total_w else 0
-        st.text(f"{mult*PRIZE_SCALE:.2f}×  —  {pct:.1f}% of pays")
+        st.text(f"{mult*PRIZE_SCALE:.2f}×  —  {pct:.1f}% of attempts")
 with colB:
     st.markdown("**Rare & Bigger Prizes:**")
     for mult, weight in zip(PRIZE_MULTIPLIERS[10:], PRIZE_WEIGHTS[10:]):
         pct = (weight / total_w) * 100 if total_w else 0
-        st.text(f"{mult*PRIZE_SCALE:.2f}×  —  {pct:.1f}% of pays")
+        st.text(f"{mult*PRIZE_SCALE:.2f}×  —  {pct:.1f}% of attempts")
