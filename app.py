@@ -13,7 +13,7 @@ MIN_MICRO_WIN = 0.05           # smallest >0 prize factor (keeps "loss" only for
 
 PRIZE_MULTIPLIERS: List[float] = [
     MIN_MICRO_WIN,             # 0.05x
-    0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9,
+    0.8, 0.85, 0.9,
     1.0, 1.05,
     1.2, 1.5, 2.0,
 ]
