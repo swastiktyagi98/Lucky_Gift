@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Fixed multiplier distribution (no baseline config, no scaling)
 # ----------------------------
 SYSTEM_FEE_RATE = 0.0       
-MIN_MICRO_WIN = 0.08          
+MIN_MICRO_WIN = 0.8          
 
 PRIZE_MULTIPLIERS: List[float] = [
     MIN_MICRO_WIN,             
