@@ -1,3 +1,4 @@
+# app.py
 import random
 from typing import List, Optional
 
@@ -6,18 +7,20 @@ from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
 
 # ----------------------------
-# Fixed multiplier distribution (no baseline config, no scaling)
+# Fixed multipliers (no baseline / no scaling)
 # ----------------------------
-SYSTEM_FEE_RATE = 0.0       
-MIN_MICRO_WIN = 1.0       
+SYSTEM_FEE_RATE = 0.0          # no fee
+
+# Minimum multiplier used as fallback when pool can't afford the drawn prize
+MIN_MICRO_WIN: float = 0.9
 
 PRIZE_MULTIPLIERS: List[float] = [
-    MIN_MICRO_WIN,             
-    1.2, 1.5, 2.0, 5.0
+    MIN_MICRO_WIN,            
+    1.0,
+    1.2,1.3, 1.5, 2.0, 5.0
 ]
-
 PRIZE_WEIGHTS: List[int] = [
-    1,                         # weight for 0.05x
+    1,                    
     8, 8, 8, 8, 8, 8, 8,
     6, 6,
     14, 11, 9,
@@ -74,8 +77,8 @@ class PlayResponse(BaseModel):
 # ----------------------------
 # Core round resolution
 #   - Pool never goes negative
-#   - User loses ONLY if available funds < theoretical prize
-#   - No fee; multiplier picked from fixed distribution
+#   - Try drawn multiplier; if unaffordable, try MIN_MICRO_WIN; else prize=0 (loss)
+#   - No fee
 # ----------------------------
 def resolve_round(
     user_id: str,
@@ -86,24 +89,33 @@ def resolve_round(
     system_fee = 0.0
     effective_bet = bet_amount
 
-    # Safety: if client ever sends negative pool (legacy), clamp to 0
+    # Safety: if client sends negative pool (legacy), clamp to 0
     pool_before_safe = max(0.0, round(pool_before, 2))
 
     # Available funds after adding the bet
     available = round(pool_before_safe + bet_amount, 2)
 
-    # Always attempt to pay based on the fixed multiplier distribution
-    mult = _select_multiplier()
-    theoretical_prize = round(bet_amount * mult, 2)
+    # Draw a multiplier from the fixed distribution
+    drawn_mult = _select_multiplier()
+    drawn_prize = round(bet_amount * drawn_mult, 2)
 
-    if theoretical_prize <= available:
-        # Pay full prize
-        prize = theoretical_prize
-        eff_mult = mult
+    prize = 0.0
+    eff_mult = 0.0
+
+    if drawn_prize <= available:
+        # Pay the drawn prize
+        prize = drawn_prize
+        eff_mult = drawn_mult
     else:
-        # Insufficient pool -> loss (prize 0)
-        prize = 0.0
-        eff_mult = 0.0
+        # Not enough for drawn prize — try minimum multiplier as fallback
+        min_prize = round(bet_amount * MIN_MICRO_WIN, 2)
+        if MIN_MICRO_WIN > 0 and min_prize <= available:
+            prize = min_prize
+            eff_mult = MIN_MICRO_WIN
+        else:
+            # Still not enough — loss (prize 0)
+            prize = 0.0
+            eff_mult = 0.0
 
     pool_after = round(available - prize, 2)  # >= 0
 
@@ -132,11 +144,13 @@ def resolve_round(
 # FastAPI app
 # ----------------------------
 app = FastAPI(
-    title="Pool Game API (Fixed Multipliers; Loss only if insufficient pool)",
-    version="3.0.0",
+    title="Pool Game API (Fixed Multipliers + Min-Multiplier Fallback)",
+    version="3.1.0",
     description=(
         "No-fee pool game with fixed prize multipliers and weights. "
-        "Pool never goes below 0. User only loses when the available funds are less than the theoretical prize. "
+        "Pool never goes below 0. "
+        "If the drawn prize exceeds available funds, the game tries the minimum multiplier; "
+        "if that's still unaffordable, prize=0 (loss). "
         "Energy: roundEnergy = bet - prize; totalEnergyAfter = userEnergy + roundEnergy."
     ),
 )
@@ -153,10 +167,14 @@ app.add_middleware(
 def health():
     return {
         "ok": True,
-        "message": "Pool game API is running (fixed multipliers; loss only if insufficient pool).",
-        "cashWinChance": None,      # wins depend on available funds (not a fixed chance)
+        "message": "Pool game API is running (fixed multipliers, min-multiplier fallback).",
+        "cashWinChance": None,      # outcomes depend on affordability, not fixed chance
         "prizeScale": 1.0,          # no scaling
-        "winCondition": "Pays full theoretical prize if available >= theoretical; otherwise prize=0 (loss).",
+        "winCondition": (
+            "Pay drawn multiplier if affordable; otherwise try minimum multiplier; "
+            "if still unaffordable, prize=0 (loss)."
+        ),
+        "minimumMultiplier": MIN_MICRO_WIN,
         "multipliers": PRIZE_MULTIPLIERS,
         "weights": PRIZE_WEIGHTS,
         "energyDefinition": "roundEnergy = bet - prize; totalEnergy = sum(roundEnergy)",
@@ -168,8 +186,10 @@ def play_round(req: PlayRequest):
     """
     Resolve a single round (stateless):
     - available = max(0, currentPool) + bet
-    - multiplier sampled from fixed distribution (no scaling)
-    - if theoretical_prize <= available: pay it; else prize = 0 (loss)
+    - drawn multiplier picked from fixed distribution
+    - if drawn_prize <= available: pay it
+      else if bet*MIN_MICRO_WIN <= available: pay minimum multiplier
+      else: prize = 0 (loss)
     - poolAfter = available - prize  (never negative)
     - Energy: roundEnergy = bet - prize. Client persists totalEnergyAfter per user.
     """
