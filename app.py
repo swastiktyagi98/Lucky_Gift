@@ -15,7 +15,7 @@ PRIZE_MULTIPLIERS: List[float] = [
     MIN_MICRO_WIN,             # 0.05x
     0.8, 0.85, 0.9,
     1.0, 1.05,
-    1.2, 1.5, 2.0,
+    1.2, 1.5, 2.0, 5.0
 ]
 
 PRIZE_WEIGHTS: List[int] = [
