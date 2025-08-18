@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 BASELINE_WIN_PROBABILITY = 0.85
 BASELINE_PRIZE_MULTIPLIERS = [
     0.0,
-    0.5, 0.6, 0.8, 0.85, 0.9,
+    0.6, 0.8, 0.85, 0.9,
     1.0, 1.05,
     1.2, 1.5, 2.0, 5.0, 8.0,
 ]
@@ -29,7 +29,7 @@ MIN_MICRO_WIN = 0.05
 
 PRIZE_MULTIPLIERS = [
     MIN_MICRO_WIN,
-    0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9,
+    0.75, 0.8, 0.85, 0.9,
     1.0, 1.05,
     1.2, 1.5, 2.0,
 ]
@@ -150,12 +150,7 @@ def resolve_round(
 
     status = "win" if prize > 0 else "loss"
 
-    # ----------------------------
     # POOL-ALIGNED ENERGY
-    # roundEnergy = effectiveBet - prize  => pool change equals roundEnergy.
-    # This guarantees: pool_after = pool_before + roundEnergy
-    # and over time: pool = startPool + sum(user energies), if all users start at 0.
-    # ----------------------------
     round_energy = round(effective_bet - prize, 2)
     total_energy_after = round(float(user_energy_before or 0.0) + round_energy, 2)
 
