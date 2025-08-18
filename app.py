@@ -12,35 +12,36 @@ PRIZE_MULTIPLIERS: List[float] = [MIN_MICRO_WIN, 2.0, 5.0, 6.0, 7.0, 8.0, 9.0, 1
 
 # Energy-based win chance configuration
 ENERGY_THRESHOLDS = {
-    'very_low': -10000,   # Energy <= -10000 (heavy losses)
-    'low': 0,             # Energy <= 0 (some losses)
-    'medium': 5000,       # Energy <= 5000 (break even to small wins)
-    'high': 15000,        # Energy <= 15000 (good wins)
-    'very_high': 25000    # Energy > 25000 (big winners)
+    'very_low': -20000,   # Energy <= -20000 (severe losses)
+    'low': -5000,         # Energy <= -5000 (significant losses)
+    'medium': 10000,      # Energy <= 10000 (break even to moderate wins)
+    'high': 30000,        # Energy <= 30000 (good wins)
+    'very_high': 50000    # Energy > 50000 (exceptional winners)
 }
 
 # Win chance configurations for different energy levels
-# Higher energy = lower win chance, lower energy = higher win chance
+# Higher energy = higher win chance (game is profitable from this user)
+# Lower energy = lower win chance (game is losing money to this user)
 WIN_CHANCE_CONFIGS = {
     'very_low': {
-        'weights': [1, 15, 12, 10, 8, 6, 4, 3],   # ~87% win chance - help recover losses
-        'description': 'Recovery Mode - Very High Win Chance'
+        'weights': [10, 5, 4, 3, 2, 2, 1, 1],      # ~39% win chance - game protects itself
+        'description': 'House Protection Mode - Very Low Win Chance'
     },
     'low': {
-        'weights': [2, 12, 10, 8, 6, 4, 3, 2],    # ~81% win chance - good recovery
-        'description': 'Favorable Odds - High Win Chance'
+        'weights': [6, 7, 6, 5, 4, 3, 2, 1],       # ~62% win chance - moderate protection
+        'description': 'House Defense Mode - Low Win Chance'
     },
     'medium': {
-        'weights': [4, 8, 7, 6, 5, 4, 3, 2],      # ~69% win chance - balanced
-        'description': 'Balanced Odds - Medium Win Chance'
+        'weights': [4, 10, 8, 7, 6, 4, 3, 2],      # ~74% win chance - balanced
+        'description': 'Balanced Mode - Good Win Chance'
     },
     'high': {
-        'weights': [6, 6, 5, 4, 3, 2, 2, 1],      # ~52% win chance - slightly unfavorable
-        'description': 'Cooling Down - Low Win Chance'
+        'weights': [2, 14, 12, 10, 8, 6, 4, 3],    # ~84% win chance - reward profitable users
+        'description': 'Reward Mode - Very High Win Chance'
     },
     'very_high': {
-        'weights': [8, 4, 3, 2, 2, 1, 1, 1],      # ~36% win chance - prevent big streaks
-        'description': 'Hot Streak Protection - Very Low Win Chance'
+        'weights': [1, 18, 15, 12, 10, 8, 6, 4],   # ~90% win chance - maximum rewards
+        'description': 'VIP Mode - Excellent Win Chance'
     }
 }
 
@@ -214,10 +215,10 @@ def analyze_energy_tier(energy: float):
 def get_energy_recommendation(tier: str) -> str:
     """Provide recommendations based on energy tier"""
     recommendations = {
-        'very_low': "Great time to play! You have the highest win chances.",
-        'low': "Good time to play with favorable odds.",
-        'medium': "Moderate win chances - play with caution.",
-        'high': "Consider taking a break or playing smaller bets.",
-        'very_high': "Very unfavorable odds - recommended to pause playing."
+        'very_low': "House protection active - very challenging odds due to your winning streak.",
+        'low': "House defense mode - lower win chances as you've been profitable.",
+        'medium': "Balanced odds - neutral game state.",
+        'high': "Rewarded player - good win chances for your contribution to the house.",
+        'very_high': "VIP treatment - excellent odds as a valued contributor!"
     }
     return recommendations.get(tier, "Unknown energy tier")
