@@ -6,55 +6,24 @@ from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
 
 # ----------------------------
-# Game economics (same base tables)
+# Fixed multiplier distribution (no baseline config, no scaling)
 # ----------------------------
-BASELINE_WIN_PROBABILITY = 0.85
-BASELINE_PRIZE_MULTIPLIERS = [
-    0.0,
-    0.5, 0.6, 0.8, 0.85, 0.9,
-    1.0, 1.05,
-    1.2, 1.5, 2.0, 5.0, 8.0,
-]
-BASELINE_PRIZE_WEIGHTS = [
-    1,
-    8, 8, 8, 8, 8, 8, 8,
-    6, 6,
-    14, 11, 9,
-]
+SYSTEM_FEE_RATE = 0.0          # no fee
+MIN_MICRO_WIN = 0.05           # smallest >0 prize factor (keeps "loss" only for insufficient pool)
 
-# No fee
-SYSTEM_FEE_RATE = 0.0
-
-# We keep a micro prize in the distribution
-MIN_MICRO_WIN = 0.05
-
-PRIZE_MULTIPLIERS = [
-    MIN_MICRO_WIN,
+PRIZE_MULTIPLIERS: List[float] = [
+    MIN_MICRO_WIN,             # 0.05x
     0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9,
     1.0, 1.05,
     1.2, 1.5, 2.0,
 ]
-PRIZE_WEIGHTS = [
-    1,
+
+PRIZE_WEIGHTS: List[int] = [
+    1,                         # weight for 0.05x
     8, 8, 8, 8, 8, 8, 8,
     6, 6,
     14, 11, 9,
 ]
-
-# ----------------------------
-# RTP helper and scale (same logic)
-# ----------------------------
-def _weighted_avg(mults: List[float], weights: List[float]) -> float:
-    tw = sum(weights)
-    return sum(m * w for m, w in zip(mults, weights)) / tw if tw else 0.0
-
-BASELINE_EXPECTED_PAYOUT_FACTOR = BASELINE_WIN_PROBABILITY * _weighted_avg(
-    BASELINE_PRIZE_MULTIPLIERS, BASELINE_PRIZE_WEIGHTS
-)
-_active_avg = _weighted_avg(PRIZE_MULTIPLIERS, PRIZE_WEIGHTS)
-PRIZE_SCALE = BASELINE_EXPECTED_PAYOUT_FACTOR / max(_active_avg, 1e-9)
-PRIZE_SCALE = max(min(PRIZE_SCALE, 2.0), 0.2)  # clamp for stability
-
 
 def _select_multiplier() -> float:
     if len(PRIZE_MULTIPLIERS) != len(PRIZE_WEIGHTS):
@@ -99,7 +68,7 @@ class PlayResponse(BaseModel):
     # compatibility fields (fee is 0; effectiveBet == bet)
     systemFee: float
     effectiveBet: float
-    # energy matches pool delta (no fee):
+    # energy mirrors pool delta (no fee):
     roundEnergy: float        # bet - prize
     totalEnergyAfter: float   # previous userEnergy + roundEnergy
 
@@ -108,6 +77,7 @@ class PlayResponse(BaseModel):
 # Core round resolution
 #   - Pool never goes negative
 #   - User loses ONLY if available funds < theoretical prize
+#   - No fee; multiplier picked from fixed distribution
 # ----------------------------
 def resolve_round(
     user_id: str,
@@ -124,14 +94,14 @@ def resolve_round(
     # Available funds after adding the bet
     available = round(pool_before_safe + bet_amount, 2)
 
-    # Always attempt to pay; only fail if insufficient funds
-    base_mult = _select_multiplier()
-    wanted_mult = round(base_mult * PRIZE_SCALE, 4)
-    theoretical_prize = round(bet_amount * wanted_mult, 2)
+    # Always attempt to pay based on the fixed multiplier distribution
+    mult = _select_multiplier()
+    theoretical_prize = round(bet_amount * mult, 2)
 
     if theoretical_prize <= available:
+        # Pay full prize
         prize = theoretical_prize
-        eff_mult = wanted_mult
+        eff_mult = mult
     else:
         # Insufficient pool -> loss (prize 0)
         prize = 0.0
@@ -139,7 +109,7 @@ def resolve_round(
 
     pool_after = round(available - prize, 2)  # >= 0
 
-    # Energy = bet - prize
+    # Energy = bet - prize (matches pool delta)
     round_energy = round(bet_amount - prize, 2)
     total_energy_after = round(float(user_energy_before or 0.0) + round_energy, 2)
 
@@ -149,7 +119,7 @@ def resolve_round(
     return PlayResponse(
         userId=user_id,
         status=status,
-        prizeAmount=round(prize, 2),
+        prizeAmount=prize,
         multiplier=eff_mult,
         poolAfter=pool_after,
         cashWin=cash_win,
@@ -164,18 +134,18 @@ def resolve_round(
 # FastAPI app
 # ----------------------------
 app = FastAPI(
-    title="Pool Game API (Loss only if insufficient pool)",
-    version="2.3.0",
+    title="Pool Game API (Fixed Multipliers; Loss only if insufficient pool)",
+    version="3.0.0",
     description=(
-        "No-fee pool game. Pool never goes below 0. "
-        "User only loses when the available funds are less than the theoretical prize. "
+        "No-fee pool game with fixed prize multipliers and weights. "
+        "Pool never goes below 0. User only loses when the available funds are less than the theoretical prize. "
         "Energy: roundEnergy = bet - prize; totalEnergyAfter = userEnergy + roundEnergy."
     ),
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten in production
+    allow_origins=["*"],  # tighten for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -185,11 +155,12 @@ app.add_middleware(
 def health():
     return {
         "ok": True,
-        "message": "Pool game API is running (loss only if insufficient pool).",
-        # We no longer use a random win-chance gate, so leave this null for the UI.
-        "cashWinChance": None,
-        "prizeScale": PRIZE_SCALE,
+        "message": "Pool game API is running (fixed multipliers; loss only if insufficient pool).",
+        "cashWinChance": None,      # wins depend on available funds (not a fixed chance)
+        "prizeScale": 1.0,          # no scaling
         "winCondition": "Pays full theoretical prize if available >= theoretical; otherwise prize=0 (loss).",
+        "multipliers": PRIZE_MULTIPLIERS,
+        "weights": PRIZE_WEIGHTS,
         "energyDefinition": "roundEnergy = bet - prize; totalEnergy = sum(roundEnergy)",
         "feeRate": SYSTEM_FEE_RATE,
     }
@@ -199,6 +170,7 @@ def play_round(req: PlayRequest):
     """
     Resolve a single round (stateless):
     - available = max(0, currentPool) + bet
+    - multiplier sampled from fixed distribution (no scaling)
     - if theoretical_prize <= available: pay it; else prize = 0 (loss)
     - poolAfter = available - prize  (never negative)
     - Energy: roundEnergy = bet - prize. Client persists totalEnergyAfter per user.
