@@ -10,11 +10,11 @@ MIN_MICRO_WIN = 0.0
 PRIZE_MULTIPLIERS: List[float] = [MIN_MICRO_WIN, 2.0, 3.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0]
 
 ENERGY_THRESHOLDS = {
-    "very_low": -1000,
-    "low": -500,
-    "medium": 1000,
-    "high": 3000,
-    "very_high": 10000,
+    "very_low": -10000,
+    "low": -5000,
+    "medium": 0,
+    "high": 1000,
+    "very_high": 5000,
 }
 
 WIN_CHANCE_CONFIGS = {
