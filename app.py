@@ -11,7 +11,7 @@ SYSTEM_FEE_RATE = 0.0
 MIN_MICRO_WIN = 0.0
 
 # Index 0 = loss (0.0), the rest are winning multipliers (keep order in sync with weights)
-PRIZE_MULTIPLIERS: List[float] = [0.0, 2.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+PRIZE_MULTIPLIERS: List[float] = [ MIN_MICRO_WIN, 2.0,3.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,12.0,15.0]
 
 # Energy buckets
 # Interpretation: higher (more positive) energy means the user has lost more overall (contributed to the house)
