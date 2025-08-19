@@ -10,35 +10,52 @@ MIN_MICRO_WIN = 0.0
 PRIZE_MULTIPLIERS: List[float] = [MIN_MICRO_WIN, 2.0, 3.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0]
 
 ENERGY_THRESHOLDS = {
-    "very_low": -10000,
-    "low": -5000,
-    "medium": 0,
-    "high": 1000,
-    "very_high": 5000,
+    "ultra_low": -20000,   # huge negative energy, big recent winner
+    "very_low": -10000,    # heavy winner
+    "low": -5000,          # moderate winner
+    "medium": 0,           # breakeven
+    "mid_high": 1000,      # slight loser
+    "high": 5000,          # losing more
+    "very_high": 10000,    # losing heavily
+    "ultra_high": 20000    # VIP big loser
 }
 
+
 WIN_CHANCE_CONFIGS = {
+    "ultra_low": {
+        "weights": [70, 5, 2, 1, 0, 0, 0, 0, 0, 0, 0],
+        "description": "Super Protection - almost no wins"
+    },
     "very_low": {
-        "weights": [60, 8, 4, 2, 1, 0, 0, 0, 0, 0, 0],
-        "description": "House Protection - Tiny wins only",
+        "weights": [55, 8, 5, 3, 2, 1, 0, 0, 0, 0, 0],
+        "description": "House Protection - very low odds"
     },
     "low": {
-        "weights": [35, 10, 6, 4, 3, 2, 1, 0, 0, 0, 0],
-        "description": "House Defense - Mostly small wins",
+        "weights": [40, 10, 7, 5, 3, 2, 1, 0, 0, 0, 0],
+        "description": "Defense Mode - low odds"
     },
     "medium": {
-        "weights": [20, 12, 9, 7, 5, 4, 3, 2, 1, 1, 0],
-        "description": "Balanced Mode - Fair odds",
+        "weights": [25, 12, 9, 7, 5, 4, 3, 2, 1, 1, 0],
+        "description": "Balanced Mode - fair odds"
+    },
+    "mid_high": {
+        "weights": [18, 14, 11, 9, 7, 6, 5, 4, 3, 2, 1],
+        "description": "Slight Reward - above average odds"
     },
     "high": {
-        "weights": [12, 14, 12, 10, 8, 6, 5, 4, 3, 2, 1],
-        "description": "Reward Mode - Higher multipliers appear more often",
+        "weights": [12, 15, 13, 11, 9, 7, 6, 5, 4, 3, 2],
+        "description": "Reward Mode - high odds and bigger multipliers"
     },
     "very_high": {
-        "weights": [7, 16, 14, 12, 10, 8, 6, 5, 4, 3, 2],
-        "description": "VIP Mode - Best chance and bigger multipliers",
+        "weights": [8, 16, 14, 12, 10, 8, 6, 5, 4, 3, 2],
+        "description": "VIP Mode - excellent odds and multipliers"
     },
+    "ultra_high": {
+        "weights": [5, 18, 16, 14, 12, 10, 8, 6, 5, 4, 3],
+        "description": "Super VIP - best odds and maximum multipliers"
+    }
 }
+
 
 def get_energy_tier(energy: float) -> str:
     if energy <= ENERGY_THRESHOLDS["very_low"]:
